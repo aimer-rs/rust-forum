@@ -1,4 +1,4 @@
-use crate::api::BASE_URL;
+use crate::api::{BASE_URL, session};
 use crate::models::comments::avatar_url;
 use crate::models::{Author, Topic, User};
 
@@ -78,10 +78,22 @@ impl TopicStreamParser {
 /// Streams the topics of a Discourse path such as `latest.json` or
 /// `c/{slug}/{id}.json`, invoking `on_topic` for each topic as soon as its
 /// object is fully received.
-pub async fn stream_topics(path: &str, mut on_topic: impl FnMut(Topic)) -> Result<(), String> {
-    let client = reqwest::Client::new();
-    let url = format!("{BASE_URL}/{path}");
-    let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
+pub async fn stream_topics(path: &str, on_topic: impl FnMut(Topic)) -> Result<(), String> {
+    stream_topics_from(BASE_URL, path, on_topic).await
+}
+
+/// [`stream_topics`] against the forum at `base_url`.
+async fn stream_topics_from(
+    base_url: &str,
+    path: &str,
+    mut on_topic: impl FnMut(Topic),
+) -> Result<(), String> {
+    let url = format!("{base_url}/{path}");
+    let mut response = session::client()
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
 
     if !response.status().is_success() {
         // Discourse serves a 403 (with `error_type: "not_logged_in"`) for lists
@@ -181,6 +193,8 @@ fn find_object_end(bytes: &[u8]) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::models::Poster;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     fn topics_object() -> Vec<String> {
         let mut parser = TopicStreamParser::new();
@@ -266,5 +280,62 @@ mod tests {
     fn find_object_end_matches_nested_arrays() {
         let json = br#"{"id":1,"posters":[{"x":1}],"nested":{"a":{}}}"#;
         assert_eq!(find_object_end(json), Some(json.len() - 1));
+    }
+
+    /// A forum on a local port that lists a topic for a request carrying the
+    /// session cookie, and answers anything else the way Discourse answers a
+    /// guest asking for `new.json`.
+    async fn forum_that_lists_for_members() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let topic = Topic {
+            id: 7,
+            title: "Members only".to_owned(),
+            slug: "members-only".to_owned(),
+            ..Default::default()
+        };
+        let listing = format!(
+            "{{\"users\":[],\"topic_list\":{{\"topics\":[{}]}}}}",
+            serde_json::to_string(&topic).unwrap()
+        );
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else { return };
+                let listing = listing.clone();
+                tokio::spawn(async move {
+                    let mut request = vec![0u8; 8192];
+                    let read = socket.read(&mut request).await.unwrap_or(0);
+                    let request = String::from_utf8_lossy(&request[..read]).to_lowercase();
+                    let (status, body) = if request.contains("_t=member-session") {
+                        ("200 OK", listing)
+                    } else {
+                        ("403 Forbidden", "{\"error_type\":\"not_logged_in\"}".to_owned())
+                    };
+                    let reply = format!(
+                        "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = socket.write_all(reply.as_bytes()).await;
+                });
+            }
+        });
+        format!("http://{address}")
+    }
+
+    #[tokio::test]
+    async fn a_member_sees_the_list_their_session_cookie_unlocks() {
+        let forum = forum_that_lists_for_members().await;
+        // What signing in leaves in the shared cookie jar.
+        session::jar().add_cookie_str(
+            "_t=member-session; Path=/",
+            &reqwest::Url::parse(&forum).unwrap(),
+        );
+
+        let mut topics = Vec::new();
+        let result = stream_topics_from(&forum, "new.json", |topic| topics.push(topic)).await;
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(topics.len(), 1);
+        assert_eq!(topics[0].title, "Members only");
     }
 }

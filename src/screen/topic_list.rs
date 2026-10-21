@@ -45,6 +45,10 @@ impl StatelessWidget for TopicListScreen {
             move |s| s.topic_stream(&path)
         });
 
+        // The forum lists differently for a member than for a guest, so the list
+        // is asked for again when who is signed in changes.
+        let member = ctx.select::<AppStore, Option<String>>(|s| s.current_user.clone());
+
         let phase = if matches!(&stream.status, StreamStatus::Loading) && stream.topics.is_empty() {
             "loading"
         } else {
@@ -65,7 +69,7 @@ impl StatelessWidget for TopicListScreen {
         .boxed();
 
         let driver = AsyncBuilder::new()
-            .request_key(path.clone())
+            .request_key(format!("{path}|{}", member.as_deref().unwrap_or("")))
             .key(format!("topics-stream-{path}"))
             .future(move || {
                 let store = store.clone();
@@ -124,16 +128,29 @@ async fn stream_topics_task(
         return Ok(());
     }
 
+    // Signing in mid-stream empties the lists; what this request still brings was
+    // fetched as the previous member (or as a guest) and does not belong in them.
+    let epoch = store.read().session_epoch;
+
     let store_for_stream = store.clone();
     let result = stream_topics(&path, |topic| {
-        store_for_stream.update(|s| s.push_stream_topic(path.clone(), topic));
+        store_for_stream.update(|s| {
+            if s.session_epoch == epoch {
+                s.push_stream_topic(path.clone(), topic);
+            }
+        });
     })
     .await;
 
-    match result {
-        Ok(()) => store.update(|s| s.finish_stream(path)),
-        Err(error) => store.update(|s| s.fail_stream(path, error)),
-    }
+    store.update(|s| {
+        if s.session_epoch != epoch {
+            return;
+        }
+        match result {
+            Ok(()) => s.finish_stream(path),
+            Err(error) => s.fail_stream(path, error),
+        }
+    });
 
     Ok(())
 }

@@ -8,7 +8,7 @@ mod user_menu;
 use std::time::Duration;
 
 use crate::components::side_bar::category_section::CategorySection;
-use crate::components::side_bar::nav_list::NavigationRow;
+use crate::components::side_bar::nav_list::{NavigationRow, SearchRow};
 use crate::components::side_bar::user_menu::UserMenuButton;
 use crate::router::AppRouter;
 use crate::theme::ForumTheme;
@@ -20,9 +20,9 @@ use aimer::{
 };
 use aimer::{Resizable};
 
-pub use mobile_bar::{MOBILE_BREAKPOINT, MobileNavbar};
+pub use mobile_bar::{BAR_HEIGHT, MOBILE_BREAKPOINT, MobileNavbar, bar_width, glass, icon_of, preview_bar, tab_icon};
 
-const SIDE_BAR_ICONS: &[&str] = &[
+pub(crate) const SIDE_BAR_ICONS: &[&str] = &[
     "assets/app-apps-applications-tiles-svgrepo-com(1).svg",
     "assets/clock-two-thirty-svgrepo-com.svg",
     "assets/hot-svgrepo-com.svg",
@@ -150,21 +150,23 @@ fn sidebar_content() -> impl Widget {
                                     Column::new()
                                         .gaps(LayoutSpacing::all(2))
                                         .children([
+                                            
                                             NavigationRow::new(
                                                 "Latest",
                                                 AppRouter::Latest,
                                                 SIDE_BAR_ICONS[0],
-                                            ),
+                                            ).boxed(),
+                                            SearchRow.boxed(),
                                             NavigationRow::new(
                                                 "New",
                                                 AppRouter::New,
                                                 SIDE_BAR_ICONS[1],
-                                            ),
+                                            ).boxed(),
                                             NavigationRow::new(
                                                 "Hot",
                                                 AppRouter::Hot,
                                                 SIDE_BAR_ICONS[2],
-                                            ),
+                                            ).boxed(),
                                         ])
                                         .boxed(),
                                     SizedBox::new().height(16).boxed(),
@@ -175,6 +177,7 @@ fn sidebar_content() -> impl Widget {
                         .boxed(),
                     SizedBox::new().height(12).boxed(),
                     UserMenuButton.boxed(),
+                    SizedBox::new().height(12).boxed(),
                 ]),
         )
 }

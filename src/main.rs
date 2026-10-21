@@ -3,10 +3,13 @@ mod app_shell;
 mod components;
 mod html_markdown;
 mod models;
+mod preferences;
 mod router;
 mod screen;
 mod store;
 mod theme;
+#[cfg(test)]
+mod testing;
 mod topic_stream;
 
 use crate::router::AppRouter;
@@ -25,8 +28,8 @@ fn main() {
         .window(
             WindowAttr::new()
                 .title("Rust Forum")
-                .inner_size(450, 780)
-//                .min_inner_size(900, 620),
+                .inner_size(1100, 780)
+               .min_inner_size(900, 620),
         )
         .setup(|| {
             MacosWindowing::new()

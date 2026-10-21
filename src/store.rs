@@ -1,13 +1,15 @@
-use aimer::share::{RcProjectExt, ShareRef, Shared};
-use aimer::style::ThemeMode;
-use std::collections::HashMap;
-use std::rc::Rc;
 use crate::api::Api;
 use crate::models::categories::{Category, CategoryRoot};
 use crate::models::comments::Comment;
 use crate::models::posts::PostRoot;
-use crate::models::user::UserProfile;
+use crate::models::search::{SearchMode, SearchResults};
+use crate::preferences::NavbarTabs;
+use crate::models::user::{ActionFilter, UserAction, UserProfile};
 use crate::models::{Root, Topic};
+use aimer::share::{RcProjectExt, ShareRef, Shared};
+use aimer::style::ThemeMode;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 #[derive(Clone, Default)]
 pub struct AppStore {
@@ -15,6 +17,8 @@ pub struct AppStore {
     pub posts: HashMap<i64, PostRoot>,
     /// Loaded user profiles, by username.
     pub profiles: HashMap<String, UserProfile>,
+    /// A user's loaded activity, by username and kind.
+    pub actions: HashMap<(String, ActionFilter), Vec<UserAction>>,
     /// The comments of each topic (by topic id), grown as batches arrive.
     pub threads: HashMap<i64, CommentThread>,
     /// The streamed topic list for a path (e.g. `latest.json`), grown
@@ -26,6 +30,24 @@ pub struct AppStore {
     pub category_details: HashMap<i64, Rc<Category>>,
     /// How the app theme is chosen (follows the system by default).
     pub theme_mode: ThemeMode,
+    /// The tabs of the bar of a narrow window.
+    pub navbar: NavbarTabs,
+    /// What the search bar holds. The bar lives in the shell and the results in
+    /// the page, so the store is where they meet.
+    /// The signed-in user's username. Nobody can sign in yet, so it is `None`.
+    pub current_user: Option<String>,
+    /// Counts the sign-ins that changed who the app is signed in as. A request
+    /// remembers the count it started under and drops its answer when it no
+    /// longer matches, so a list fetched as a guest never lands in the lists of
+    /// the member who signed in while it was on its way.
+    pub session_epoch: u64,
+    pub search_term: String,
+    pub search_mode: SearchMode,
+    /// What each search found, by its (trimmed) term and mode.
+    pub searches: HashMap<(String, SearchMode), SearchResults>,
+    /// The most recent results of each mode, for the page to keep showing while
+    /// the next search for another term is on its way.
+    pub last_searches: HashMap<SearchMode, SearchResults>,
 }
 
 /// The comments loaded so far for one topic, in post order.
@@ -42,7 +64,7 @@ pub struct TopicStream {
     pub status: StreamStatus,
 }
 
-#[derive(Clone, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub enum StreamStatus {
     #[default]
     Loading,
@@ -51,6 +73,31 @@ pub enum StreamStatus {
 }
 
 impl AppStore {
+    /// Records `username` as the signed-in member and drops every list streamed
+    /// before, since the forum answers a member differently from a guest: some
+    /// lists (`new.json`) are only theirs to see, and the rest carry what they
+    /// have and have not read. The lists are streamed again when next shown.
+    ///
+    /// Signing in as who is already in changes nothing, so a restored session
+    /// that turns up after a sign-in by hand does not throw its lists away.
+    pub fn sign_in(&mut self, username: String) {
+        if self.current_user.as_deref() == Some(username.as_str()) {
+            return;
+        }
+        self.current_user = Some(username);
+        self.streams.clear();
+        self.session_epoch += 1;
+    }
+
+    /// Forgets who the app is signed in as, and every list streamed as them: the
+    /// forum answers a guest differently, see [`AppStore::sign_in`].
+    pub fn sign_out(&mut self) {
+        if self.current_user.take().is_some() {
+            self.streams.clear();
+            self.session_epoch += 1;
+        }
+    }
+
     pub async fn fetch_latest(&mut self) {
         let store = Api::get("latest.json").await.unwrap();
         self.root = store;
@@ -68,6 +115,32 @@ impl AppStore {
 
     pub fn cache_post(&mut self, id: i64, post: PostRoot) {
         self.posts.insert(id, post);
+    }
+
+    pub fn cached_actions(&self, username: &str, filter: ActionFilter) -> Option<Vec<UserAction>> {
+        self.actions.get(&(username.to_string(), filter)).cloned()
+    }
+
+    pub fn cache_actions(
+        &mut self,
+        username: &str,
+        filter: ActionFilter,
+        actions: Vec<UserAction>,
+    ) {
+        self.actions.insert((username.to_string(), filter), actions);
+    }
+
+    pub fn cached_search(&self, term: &str, mode: SearchMode) -> Option<SearchResults> {
+        self.searches.get(&(term.to_string(), mode)).cloned()
+    }
+
+    pub fn cache_search(&mut self, term: &str, mode: SearchMode, results: SearchResults) {
+        self.last_searches.insert(mode, results.clone());
+        self.searches.insert((term.to_string(), mode), results);
+    }
+
+    pub fn last_search(&self, mode: SearchMode) -> Option<SearchResults> {
+        self.last_searches.get(&mode).cloned()
     }
 
     pub fn cached_profile(&self, username: &str) -> Option<UserProfile> {
@@ -122,8 +195,27 @@ impl AppStore {
             .map(|topic| topic.title.clone())
     }
 
+    /// The likes and replies a post's action bar shows: from the post once it
+    /// has loaded, else from its topic card, else nothing.
+    pub fn post_counts(&self, id: i64) -> (i64, i64) {
+        if let Some(post) = self.posts.get(&id) {
+            return (post.like_count, post.reply_count);
+        }
+        self.streams
+            .values()
+            .flat_map(|stream| stream.topics.iter())
+            .find(|topic| topic.id == id)
+            .map_or((0, 0), |topic| {
+                (topic.like_count, topic.posts_count.saturating_sub(1))
+            })
+    }
+
     pub fn push_stream_topic(&mut self, path: ShareRef<str>, topic: Topic) {
-        self.streams.entry(path).or_default().topics.push(Shared::new(topic));
+        self.streams
+            .entry(path)
+            .or_default()
+            .topics
+            .push(Shared::new(topic));
     }
 
     pub fn finish_stream(&mut self, path: ShareRef<str>) {
@@ -149,7 +241,7 @@ impl AppStore {
     pub fn cache_categories(&mut self, categories: &[Rc<Category>]) {
         self.categories = categories
             .into_iter()
-            .map(|category| (category.id, category.project(|item|item.name.as_str())))
+            .map(|category| (category.id, category.project(|item| item.name.as_str())))
             .collect();
         self.category_details = categories
             .iter()
@@ -158,8 +250,7 @@ impl AppStore {
     }
 
     pub async fn stream_posts(&mut self) {
-        let client = reqwest::Client::new();
-        let body = match client
+        let body = match crate::api::session::client()
             .get("https://users.rust-lang.org/latest.json")
             .send()
             .await
@@ -197,7 +288,11 @@ mod tests {
     use super::*;
 
     fn topic(id: i64, title: &str) -> Topic {
-        Topic { id, title: title.to_owned(), ..Default::default() }
+        Topic {
+            id,
+            title: title.to_owned(),
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -217,5 +312,76 @@ mod tests {
 
         store.push_stream_topic(ShareRef::from_static("latest.json"), topic(1, "First"));
         assert_eq!(store.topic_title(7), None);
+    }
+
+    #[test]
+    fn signing_in_drops_the_lists_fetched_as_a_guest() {
+        let mut store = AppStore::default();
+        let path = ShareRef::from_static("new.json");
+        store.push_stream_topic(path.clone(), topic(1, "First"));
+        store.fail_stream(path, "Required to Login".to_owned());
+        let before = store.session_epoch;
+
+        store.sign_in("domma".to_owned());
+
+        assert_eq!(store.current_user.as_deref(), Some("domma"));
+        assert!(store.topic_stream("new.json").topics.is_empty());
+        assert_eq!(store.topic_stream("new.json").status, StreamStatus::Loading);
+        assert_ne!(store.session_epoch, before);
+    }
+
+    #[test]
+    fn signing_in_as_who_is_already_in_changes_nothing() {
+        let mut store = AppStore::default();
+        store.sign_in("domma".to_owned());
+        store.push_stream_topic(ShareRef::from_static("latest.json"), topic(1, "First"));
+        let epoch = store.session_epoch;
+
+        store.sign_in("domma".to_owned());
+
+        assert_eq!(store.topic_stream("latest.json").topics.len(), 1);
+        assert_eq!(store.session_epoch, epoch);
+    }
+
+    #[test]
+    fn signing_out_drops_the_member_and_the_lists_streamed_as_them() {
+        let mut store = AppStore::default();
+        store.sign_in("domma".to_owned());
+        store.push_stream_topic(ShareRef::from_static("new.json"), topic(1, "First"));
+        let epoch = store.session_epoch;
+
+        store.sign_out();
+
+        assert_eq!(store.current_user, None);
+        assert!(store.topic_stream("new.json").topics.is_empty());
+        assert_ne!(store.session_epoch, epoch);
+
+        // Nobody to sign out changes nothing.
+        let epoch = store.session_epoch;
+        store.sign_out();
+        assert_eq!(store.session_epoch, epoch);
+    }
+
+    #[test]
+    fn a_search_is_remembered_by_its_term_and_mode() {
+        use crate::models::search::{SearchMode, SearchResults};
+        let mut store = AppStore::default();
+        store.cache_search("apple", SearchMode::Blog, SearchResults::Blog(vec![]));
+
+        assert!(store.cached_search("apple", SearchMode::Blog).is_some());
+        assert!(store.cached_search("apple", SearchMode::User).is_none());
+        assert!(store.cached_search("pear", SearchMode::Blog).is_none());
+    }
+
+    #[test]
+    fn the_last_results_of_a_mode_stay_to_be_shown_while_the_next_term_loads() {
+        use crate::models::search::{BlogHit, SearchMode, SearchResults};
+        let mut store = AppStore::default();
+        assert!(store.last_search(SearchMode::Blog).is_none());
+
+        let hits = SearchResults::Blog(vec![BlogHit::default()]);
+        store.cache_search("apple", SearchMode::Blog, hits.clone());
+        assert_eq!(store.last_search(SearchMode::Blog), Some(hits));
+        assert!(store.last_search(SearchMode::User).is_none());
     }
 }

@@ -9,6 +9,10 @@ use aimer::{
     SizedBox, StatelessWidget, Widget, ZeroSizedBox,
 };
 
+/// How many skeleton cards have been built, for tests that look for one flashing.
+#[cfg(test)]
+pub(crate) static BUILT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 pub(crate) const PULSE_CYCLE: Duration = Duration::from_millis(1000);
 
 /// A grey placeholder that mirrors [`super::topic_card::TopicCard`]'s shape and
@@ -20,6 +24,8 @@ pub struct SkeletonTopicCard {
 
 impl SkeletonTopicCard {
     pub fn new() -> Self {
+        #[cfg(test)]
+        BUILT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let controller = AnimationController::new(PULSE_CYCLE, curves::EASE_IN_OUT);
         controller.set_repeat(true);
         controller.set_auto_reverse(true);

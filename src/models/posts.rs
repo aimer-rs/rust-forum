@@ -276,6 +276,16 @@ impl Post {
     pub fn reply_to(&self) -> Option<i64> {
         self.reply_to_post_number.as_i64()
     }
+
+    /// How many likes the post has: the count of Discourse's "like" action.
+    pub fn like_count(&self) -> i64 {
+        const LIKE_ACTION_ID: i64 = 2;
+        self.actions_summary
+            .iter()
+            .find(|action| action.id == LIKE_ACTION_ID)
+            .and_then(|action| action.count)
+            .unwrap_or(0)
+    }
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]

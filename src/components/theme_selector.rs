@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::preferences;
 use crate::store::AppStore;
 use crate::theme::ForumTheme;
 use aimer::animation::{ImplicitAnimatedBuilder, curves};
@@ -8,17 +9,17 @@ use aimer::style::{
     ThemeMode,
 };
 use aimer::{
-    AnyWidget, BuildContext, Color, Container, Dimension, FontWeight, ProviderContext,
+    Align, Alignment, AnyWidget, BuildContext, Color, Container, Dimension, Expanded, FontWeight, ProviderContext,
     ProviderHandle, Row, StatelessWidget, Text, Widget,
 };
 use aimer::input::button::Button;
 
-const BUTTON_WIDTH: f32 = 96.0;
 const BUTTON_HEIGHT: f32 = 40.0;
 const TRANSITION_DURATION: Duration = Duration::from_millis(240);
 
-/// A row of three theme-mode buttons — `Light`, `Dark`, and `System`. The
-/// active mode uses the accent colour; the others use the card decoration.
+/// A row of three theme-mode buttons — `Light`, `Dark`, and `System` — that share
+/// the width they are given. The active mode uses the accent colour; the others
+/// use the card decoration.
 #[derive(Clone, StatelessWidget)]
 pub struct ThemeSelector;
 
@@ -29,9 +30,9 @@ impl StatelessWidget for ThemeSelector {
         let mode = ctx.select::<AppStore, ThemeMode>(|s| s.theme_mode);
 
         Row::new().gaps(LayoutSpacing::all(8)).children([
-            theme_button("Light", ThemeMode::Light, mode, theme, store.clone()),
-            theme_button("Dark", ThemeMode::Dark, mode, theme, store.clone()),
-            theme_button("System", ThemeMode::System, mode, theme, store),
+            Expanded::new().box_child(theme_button("Light", ThemeMode::Light, mode, theme, store.clone())),
+            Expanded::new().box_child(theme_button("Dark", ThemeMode::Dark, mode, theme, store.clone())),
+            Expanded::new().box_child(theme_button("System", ThemeMode::System, mode, theme, store)),
         ])
     }
 }
@@ -54,7 +55,7 @@ fn theme_button(
     let active_border = Color::Transparent;
 
     Button::new()
-        .on_press(move || store.update(move |s| s.set_theme_mode(this_mode)))
+        .on_press(move || preferences::set_theme_mode(&store, this_mode))
         .child(
             ImplicitAnimatedBuilder::new(
                 if active { 1.0 } else { 0.0 },
@@ -67,7 +68,7 @@ fn theme_button(
                     let border = inactive_border.lerp(active_border, progress);
 
                     Container::new()
-                        .width(Dimension::Px(BUTTON_WIDTH))
+                        .width(Dimension::Percent(100.0))
                         .height(Dimension::Px(BUTTON_HEIGHT))
                         .box_decoration(
                             BoxDecoration::new()
@@ -80,7 +81,7 @@ fn theme_button(
                                         .color(border),
                                 )),
                         )
-                        .child(
+                        .child(Align::new().alignment(Alignment::MidCenter).child(
                             Text::new(label)
                                 .text_align(TextAlign::MidCenter)
                                 .text_style(
@@ -89,7 +90,7 @@ fn theme_button(
                                         .font_weight(FontWeight::Bold)
                                         .color(fg),
                                 ),
-                        )
+                        ))
                 },
             )
             .key(format!("theme-button-{label}")),

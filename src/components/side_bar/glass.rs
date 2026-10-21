@@ -80,11 +80,12 @@ impl Decoration for GlassDecoration {
             Rect::new(origin.x, origin.y, size.width, size.height),
             [radius; 4],
         );
+         self.body(radius).paint_layer(canvas, origin, size, scale);
         self.filter.paint(canvas, origin, size, scale);
         self.lens.paint(canvas, origin, size, scale);
         canvas.pop_clip();
 
-        self.body(radius).paint_layer(canvas, origin, size, scale);
+       
         self.edge
             .paint_layer(canvas, origin, size, scale);
     }

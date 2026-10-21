@@ -4,13 +4,16 @@ use std::time::Duration;
 use crate::app_shell::AppShell;
 use crate::components::topic_card::topic_tag;
 use crate::screen::post_detail::PostDetailScreen;
-use crate::screen::settings::SettingsScreen;
+use crate::screen::account::AccountScreen;
+use crate::screen::login::{EmailCodeScreen, LoginScreen, PasswordScreen};
+use crate::screen::search::SearchScreen;
+use crate::screen::settings::{AppearanceScreen, SettingsScreen};
 use crate::screen::topic_list::TopicListScreen;
 use crate::screen::user_profile::UserProfileScreen;
 use aimer::animation::curves;
 use aimer::router::{
     CrossFadeTransition, ExpandTransition, NavigationContext, NavigationTransition, ResolvedNavigationTransition,
-    Route, Router, Shell, TransitionChoice, ViewLevelTransitions,
+    Route, Router, Shell, SlideTransition, TransitionChoice, ViewLevelTransitions,
 };
 use aimer::share::{ShareRef, Shared};
 use aimer::widget::{AnyElement, PortableWidget};
@@ -19,9 +22,11 @@ use aimer::{AnyWidget, BuildContext, Key, Widget};
 const ROUTE_TRANSITION_DURATION: Duration = Duration::from_millis(200);
 /// How long a post takes to open out of its card and to close into it again.
 const POST_OPEN_DURATION: Duration = Duration::from_millis(500);
-/// Blur, in logical pixels, that builds on the feed while the post opens. It is
-/// kept light: the motion should read as one move, not as a change of focus.
-const POST_OPEN_BLUR: f32 = 4.0;
+/// The most blur, in logical pixels, that builds on everything while the card
+/// dissolves into the post: sharp before the dissolve, this much at its peak
+/// (held through the middle of it, see `POST_BLUR_HELD`), and sharp again after.
+/// `0.0` turns the blur off. The renderer clamps it to 96.
+const POST_OPEN_BLUR: f32 = 30.0;
 /// How dark the feed has gone, from 0 to 1, by the time the post fills the screen.
 const POST_OPEN_DIM: f32 = 0.5;
 /// The fraction of the dissolve through which the blur stays at its fullest. The
@@ -52,7 +57,13 @@ pub enum AppRouter {
     CategoryTopics { slug: ShareRef<str>, id: i64 },
     PostDetail { slug: ShareRef<str>, id: i64 },
     UserProfile { username: ShareRef<str> },
+    Search,
+    Account,
+    Login,
+    LoginEmail,
+    LoginPassword,
     Settings,
+    SettingsAppearance,
 }
 
 impl Route for AppRouter {
@@ -63,7 +74,19 @@ impl Route for AppRouter {
             "" => Self::Latest,
             "new" => Self::New,
             "hot" => Self::Hot,
-            "settings" => Self::Settings,
+            "settings" => match segments.next() {
+                None => Self::Settings,
+                Some("appearance") => Self::SettingsAppearance,
+                Some(_) => return None,
+            },
+            "search" => Self::Search,
+            "account" => Self::Account,
+            "login" => match segments.next() {
+                None => Self::Login,
+                Some("email") => Self::LoginEmail,
+                Some("password") => Self::LoginPassword,
+                Some(_) => return None,
+            },
             "u" => Self::UserProfile {
                 username: ShareRef::from_str_slice(segments.next()?),
             },
@@ -89,7 +112,13 @@ impl Route for AppRouter {
             Self::CategoryTopics { slug, id } => format!("/c/{slug}/{id}"),
             Self::PostDetail { slug, id } => format!("/t/{slug}/{id}"),
             Self::UserProfile { username } => format!("/u/{username}"),
+            Self::Search => "/search".to_string(),
+            Self::Account => "/account".to_string(),
+            Self::Login => "/login".to_string(),
+            Self::LoginEmail => "/login/email".to_string(),
+            Self::LoginPassword => "/login/password".to_string(),
             Self::Settings => "/settings".to_string(),
+            Self::SettingsAppearance => "/settings/appearance".to_string(),
         }
     }
 
@@ -144,6 +173,15 @@ impl Route for AppPage {
     fn navigation_transition(&self) -> TransitionChoice<Self> {
         match self.0 {
             AppRouter::PostDetail { .. } => TransitionChoice::custom(PostTransition::new()),
+            // The sign-in and settings pages slide in over the page before, as a page of a stack
+            // does, and slide away again on a pop or an edge swipe.
+            AppRouter::Login
+            | AppRouter::LoginEmail
+            | AppRouter::LoginPassword
+            | AppRouter::Settings
+            | AppRouter::SettingsAppearance => {
+                TransitionChoice::custom(SlideTransition::new())
+            }
             _ => TransitionChoice::Inherit,
         }
     }
@@ -163,11 +201,13 @@ enum PostMotion {
 ///
 /// A profile lists posts too, but its rows are not the cards the page grows out
 /// of: the card of that topic may be somewhere in a feed that is no longer on
-/// screen, and the page would grow from where it was. So a post reached from a
-/// profile, and the way back to it, slide by view level instead.
+/// screen, and the page would grow from where it was. The search page is a
+/// place to look something up rather than a feed to open cards from, and it
+/// keeps no card to shrink back into. So a post reached from either, and the way
+/// back to it, slide by view level instead.
 fn post_motion(from: &AppPage, to: &AppPage) -> PostMotion {
-    let involves_profile = |page: &AppPage| matches!(page.0, AppRouter::UserProfile { .. });
-    if involves_profile(from) || involves_profile(to) { PostMotion::SlideByLevel } else { PostMotion::Expand }
+    let slides = |page: &AppPage| matches!(page.0, AppRouter::UserProfile { .. } | AppRouter::Search);
+    if slides(from) || slides(to) { PostMotion::SlideByLevel } else { PostMotion::Expand }
 }
 
 /// The transition of a post page: it grows out of its card from a feed, and
@@ -202,11 +242,15 @@ impl NavigationTransition<AppPage> for PostTransition {
 /// The card's window starts opening on the first frame and grows over the whole
 /// open, on `FAST_OUT_SLOW_IN`, quickly at first and settling slowly; its corners
 /// round off with it. The card is stretched to the window, so it is the card
-/// itself that expands, and inside it the card slowly dissolves into the post, from a
-/// fifth of the way in to seven tenths (`post_dissolve`), so the two are
-/// happening at once: the card is still growing as it becomes the post, and the
-/// post is still growing once it has. The feed behind blurs at its fullest
-/// through the middle of the dissolve (`POST_BLUR_HELD`) and darkens to
+/// itself that expands.
+///
+/// Inside it the card crossfades into the post, from a fifth of the way in to
+/// seven tenths (`post_dissolve`), on an S-curve (slow, quick, slow) with the
+/// post rising exactly as the card falls. The two are happening at once: the card
+/// is still growing as it becomes the post, and the post is still growing once it
+/// has. Everything blurs through the dissolve, up to `POST_OPEN_BLUR` and held at
+/// that through the middle of it (`POST_BLUR_HELD`), which also hides the little
+/// of the feed that shows through at the crossing. The feed darkens to
 /// `POST_OPEN_DIM` along the window, as the window covers it, so the post reads
 /// as shading what it leaves behind.
 ///
@@ -216,13 +260,15 @@ fn post_expand_transition() -> ExpandTransition<AppPage> {
     ExpandTransition::new()
         .tag(post_card_tag)
         .duration(POST_OPEN_DURATION)
-        .grow_curve(curves::FAST_OUT_SLOW_IN)
+        .grow_curve(curves::EASE_IN_OUT)
         .dissolve(post_dissolve())
+        .dissolve_curve(curves::EASE_IN_OUT)
+        .crossfade(true)
         .scrim(POST_OPEN_DIM)
         .blur(POST_OPEN_BLUR)
         .blur_held(POST_BLUR_HELD)
         .source_radius(POST_CARD_RADIUS)
-        .page_radius(0.0)
+        .page_radius(16.0)
 }
 
 /// The topic card a post page grows out of, or `None` for any other route.
@@ -245,7 +291,13 @@ impl Router for AppPage {
             }
             AppRouter::PostDetail { slug, id } => PostDetailScreen::new(slug.clone(), *id).boxed(),
             AppRouter::UserProfile { username } => UserProfileScreen::new(username.clone()).boxed(),
+            AppRouter::Search => SearchScreen.boxed(),
+            AppRouter::Account => AccountScreen.boxed(),
+            AppRouter::Login => LoginScreen.boxed(),
+            AppRouter::LoginEmail => EmailCodeScreen.boxed(),
+            AppRouter::LoginPassword => PasswordScreen.boxed(),
             AppRouter::Settings => SettingsScreen.boxed(),
+            AppRouter::SettingsAppearance => AppearanceScreen.boxed(),
         }
     }
 }
@@ -282,12 +334,13 @@ mod tests {
 
     #[test]
     fn routes_round_trip_through_their_paths() {
-        for path in ["/", "/new", "/hot", "/settings", "/c/rust/12", "/t/hello-world/345", "/u/domma"] {
+        for path in ["/", "/new", "/hot", "/settings", "/settings/appearance", "/search", "/account", "/login", "/login/email", "/login/password", "/c/rust/12", "/t/hello-world/345", "/u/domma"] {
             let route = AppRouter::parse(path).expect(path);
             assert_eq!(route.format(), path);
         }
         assert!(AppRouter::parse("/t/hello/not-a-number").is_none());
         assert!(AppRouter::parse("/new/extra").is_none());
+        assert!(AppRouter::parse("/login/other").is_none());
         assert!(AppRouter::parse("/nope").is_none());
     }
 
@@ -298,6 +351,14 @@ mod tests {
 
     /// The app on a feed of `count` topics, ids from 1, already streamed.
     fn feed_app(count: i64) -> aimer::HeadlessAimerApp<impl aimer::Widget + 'static> {
+        feed_app_with(count, |_| {})
+    }
+
+    /// [`feed_app`], with `seed` run on the store before the app starts.
+    fn feed_app_with(
+        count: i64,
+        seed: impl FnOnce(&mut crate::store::AppStore),
+    ) -> aimer::HeadlessAimerApp<impl aimer::Widget + 'static> {
         use crate::models::Topic;
         use crate::store::AppStore;
         use aimer::quiver::winit::dpi::PhysicalSize;
@@ -305,6 +366,7 @@ mod tests {
         use aimer::{AimerApp, HeadlessOptions, Provider};
 
         let mut store = AppStore::default();
+        seed(&mut store);
         // The same topics on every list, as the real lists overlap.
         for path in ["latest.json", "new.json", "hot.json"] {
             let path = ShareRef::from_static(path);
@@ -324,6 +386,7 @@ mod tests {
         store.finish_stream(path);
         }
 
+        crate::testing::hold();
         let mut app = AimerApp::start_headless_with(
             Provider::new()
                 .create(move || store.clone())
@@ -365,6 +428,57 @@ mod tests {
             frames += 1;
         }
         frames
+    }
+
+    /// Taps a card and watches every frame of the open for a skeleton.
+    fn skeletons_while_opening(cached_post: bool) -> (usize, usize) {
+        use crate::components::skeleton_topic_card::BUILT as LIST;
+        use crate::screen::post_detail::BUILT as POST;
+        use aimer::animation::shared_element_bounds;
+        use std::sync::atomic::Ordering::SeqCst;
+
+        let mut app = feed_app_with(3, |store| {
+            if cached_post {
+                store.cache_post(2, Default::default());
+            }
+        });
+        let card = shared_element_bounds(&topic_tag(2)).expect("the card is a shared element");
+        let (list_before, post_before) = (LIST.load(SeqCst), POST.load(SeqCst));
+
+        click(&mut app, (card.x + card.width / 2.0, card.y + card.height / 2.0));
+        for _ in 0..60 {
+            std::thread::sleep(Duration::from_millis(10));
+            app.pump_frames(1);
+        }
+        (LIST.load(SeqCst) - list_before, POST.load(SeqCst) - post_before)
+    }
+
+    #[test]
+    fn opening_a_cached_post_builds_no_skeleton_anywhere() {
+        let (list, post) = skeletons_while_opening(true);
+        assert_eq!((list, post), (0, 0), "skeletons built: list {list}, post {post}");
+    }
+
+    #[test]
+    fn opening_a_post_builds_the_shells_action_bar() {
+        use crate::app_shell::BAR_BUILDS;
+        use aimer::animation::shared_element_bounds;
+        use std::sync::atomic::Ordering::SeqCst;
+
+        let mut app = feed_app(3);
+        let before = BAR_BUILDS.load(SeqCst);
+        let card = shared_element_bounds(&topic_tag(2)).unwrap();
+        click(&mut app, (card.x + card.width / 2.0, card.y + card.height / 2.0));
+        settle(&mut app);
+        assert!(BAR_BUILDS.load(SeqCst) > before, "the action bar was never built");
+    }
+
+    #[test]
+    fn opening_an_uncached_post_does_show_its_skeleton_while_it_loads() {
+        // Keeps the counting honest: the same watch must see a skeleton here.
+        let (list, post) = skeletons_while_opening(false);
+        assert!(post > 0, "no post skeleton was built");
+        assert_eq!(list, 0, "the feed must never fall back to its skeleton");
     }
 
     #[test]
@@ -428,6 +542,13 @@ mod tests {
     }
 
     #[test]
+    fn the_blur_builds_to_thirty_pixels_at_its_peak() {
+        // Configurable in `POST_OPEN_BLUR`: the feed goes from sharp to this many
+        // pixels of blur through the dissolve, and back to sharp.
+        assert_eq!(POST_OPEN_BLUR, 30.0);
+    }
+
+    #[test]
     fn the_card_dissolves_into_the_post_while_the_window_is_still_growing() {
         // The window grows over the whole open, so the card is dissolving into
         // the post only when the dissolve starts after the start and ends before
@@ -460,6 +581,14 @@ mod tests {
     }
 
     #[test]
+    fn a_post_opened_from_the_search_slides_by_view_level_and_pops_back_the_same_way() {
+        let search = page(AppRouter::Search);
+        assert_eq!(post_motion(&search, &post()), PostMotion::SlideByLevel);
+        assert_eq!(post_motion(&post(), &search), PostMotion::SlideByLevel);
+        assert!(post().view_level() > search.view_level());
+    }
+
+    #[test]
     fn a_post_opened_from_anywhere_else_still_grows_out_of_its_card() {
         for other in [
             page(AppRouter::Latest),
@@ -483,6 +612,137 @@ mod tests {
         assert!(profile().view_level() > page(AppRouter::Latest).view_level());
     }
 
+    /// A finger on the window: goes down at `from`, travels to `to` in `steps`
+    /// moves with a frame after each, and lifts there.
+    fn swipe(app: &mut aimer::HeadlessAimerApp<impl aimer::Widget + 'static>, from: (f32, f32), to: (f32, f32), steps: u32) {
+        use aimer::quiver::winit::dpi::PhysicalPosition;
+        use aimer::quiver::winit::event::{DeviceId, Touch, TouchPhase, WindowEvent};
+
+        let touch = |phase, at: (f32, f32)| WindowEvent::Touch(Touch {
+            device_id: DeviceId::dummy(),
+            phase,
+            location: PhysicalPosition::new(at.0 as f64, at.1 as f64),
+            force: None,
+            id: 1,
+        });
+        app.send_window_event(touch(TouchPhase::Started, from));
+        app.pump_frames(1);
+        for step in 1..=steps {
+            let t = step as f32 / steps as f32;
+            app.send_window_event(touch(TouchPhase::Moved, (from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t)));
+            app.pump_frames(1);
+        }
+        app.send_window_event(touch(TouchPhase::Ended, to));
+    }
+
+    /// Opens the post of topic 2 from the feed, then drags a finger rightward
+    /// from `from` to well past halfway across the page, and says whether the feed
+    /// is back.
+    fn feed_is_back_after_swiping_the_post_from(from: (f32, f32)) -> bool {
+        use aimer::animation::shared_element_bounds;
+
+        let mut app = feed_app(3);
+        let card = shared_element_bounds(&topic_tag(2)).expect("the card is on screen");
+        click(&mut app, (card.x + card.width / 2.0, card.y + card.height / 2.0));
+        assert!(settle(&mut app) > 5, "the post opens");
+        assert!(shared_element_bounds(&topic_tag(2)).is_none(), "the feed is gone while the post is open");
+
+        swipe(&mut app, from, (400.0, from.1), 12);
+        settle(&mut app);
+        app.pump_frames(3);
+
+        shared_element_bounds(&topic_tag(2)).is_some()
+    }
+
+    /// A two-finger drag on a trackpad: the fingers go down, travel `dx` pixels
+    /// sideways in `steps` events with a frame after each, rest for `rest` if they
+    /// are to lift without any speed, and lift.
+    fn trackpad_drag(
+        app: &mut aimer::HeadlessAimerApp<impl aimer::Widget + 'static>,
+        dx: f64,
+        steps: u32,
+        rest: Duration,
+    ) {
+        use aimer::quiver::winit::dpi::PhysicalPosition;
+        use aimer::quiver::winit::event::{DeviceId, MouseScrollDelta, TouchPhase, WindowEvent};
+
+        let wheel = |phase, dx: f64| WindowEvent::MouseWheel {
+            device_id: DeviceId::dummy(),
+            delta: MouseScrollDelta::PixelDelta(PhysicalPosition::new(dx, 0.0)),
+            phase,
+        };
+        let step = |app: &mut aimer::HeadlessAimerApp<_>| {
+            std::thread::sleep(Duration::from_millis(8));
+            app.pump_frames(1);
+        };
+        // A trackpad announces a new touch twice: may-begin, then begin.
+        for _ in 0..2 {
+            app.send_window_event(wheel(TouchPhase::Started, 2.0));
+            step(app);
+        }
+        for _ in 0..steps {
+            app.send_window_event(wheel(TouchPhase::Moved, dx / steps as f64));
+            step(app);
+        }
+        // Real time is what a flick's speed is measured in, so a drag that must not
+        // be one rests until none of its travel is recent, whatever the machine is
+        // doing meanwhile.
+        // Frames go on while they rest: the smoother hands the distance it was given
+        // to the page over frames, and a display does not stop for a pause.
+        let started = std::time::Instant::now();
+        while started.elapsed() < rest {
+            std::thread::sleep(Duration::from_millis(8));
+            app.pump_frames(1);
+        }
+        app.send_window_event(wheel(TouchPhase::Ended, 0.0));
+        step(app);
+    }
+
+    #[test]
+    fn a_two_finger_trackpad_swipe_right_on_a_post_brings_the_feed_back() {
+        use aimer::animation::shared_element_bounds;
+
+        let mut app = feed_app(3);
+        let card = shared_element_bounds(&topic_tag(2)).expect("the card is on screen");
+        click(&mut app, (card.x + card.width / 2.0, card.y + card.height / 2.0));
+        assert!(settle(&mut app) > 5, "the post opens");
+        assert!(shared_element_bounds(&topic_tag(2)).is_none(), "the feed is gone while the post is open");
+
+        // Well past the travel a full pop takes on a 450 px page.
+        trackpad_drag(&mut app, 400.0, 16, Duration::ZERO);
+        settle(&mut app);
+        app.pump_frames(3);
+
+        assert!(shared_element_bounds(&topic_tag(2)).is_some(), "the swipe did not take the post back to the feed");
+    }
+
+    #[test]
+    fn a_two_finger_trackpad_swipe_that_stops_short_leaves_the_post_where_it_is() {
+        use aimer::animation::shared_element_bounds;
+
+        let mut app = feed_app(3);
+        let card = shared_element_bounds(&topic_tag(2)).expect("the card is on screen");
+        click(&mut app, (card.x + card.width / 2.0, card.y + card.height / 2.0));
+        assert!(settle(&mut app) > 5, "the post opens");
+
+        // A little way, and the fingers rest before they lift.
+        trackpad_drag(&mut app, 40.0, 16, Duration::from_millis(300));
+        settle(&mut app);
+        app.pump_frames(3);
+
+        assert!(shared_element_bounds(&topic_tag(2)).is_none(), "the post is still open");
+    }
+
+    #[test]
+    fn swiping_right_from_the_left_edge_of_a_post_brings_the_feed_back() {
+        assert!(feed_is_back_after_swiping_the_post_from((8.0, 400.0)));
+    }
+
+    #[test]
+    fn swiping_right_from_the_middle_of_a_post_brings_the_feed_back() {
+        assert!(feed_is_back_after_swiping_the_post_from((150.0, 400.0)));
+    }
+
     #[test]
     fn every_route_shares_the_shell_boundary() {
         assert_eq!(AppRouter::Latest.shell_key(), AppRouter::Settings.shell_key());
@@ -496,5 +756,13 @@ mod tests {
         assert!(matches!(AppPage(AppRouter::Hot).navigation_transition(), TransitionChoice::Inherit));
         // A shell key here would make the outlet skip its animation.
         assert!(post.shell_key().is_none());
+    }
+
+    #[test]
+    fn the_sign_in_pages_slide_in_and_the_account_page_before_them_does_not() {
+        for route in [AppRouter::Login, AppRouter::LoginEmail, AppRouter::LoginPassword] {
+            assert!(matches!(AppPage(route).navigation_transition(), TransitionChoice::Custom(_)));
+        }
+        assert!(matches!(AppPage(AppRouter::Account).navigation_transition(), TransitionChoice::Inherit));
     }
 }

@@ -1,8 +1,7 @@
+use crate::components::profile_link::profile_link;
 use crate::components::side_bar::parse_hex_color;
 use crate::models::categories::Category;
-use crate::components::profile_link::profile_link;
 use crate::models::{Author, Topic};
-use std::rc::Rc;
 use crate::router::AppRouter;
 use crate::store::AppStore;
 use crate::theme::ForumTheme;
@@ -11,17 +10,18 @@ use aimer::input::button::Button;
 use aimer::router::NavigatorController;
 use aimer::share::{ShareRef, Shared};
 use aimer::style::{
-    BorderSlice, BorderStyle, BoxBorder, BoxDecoration, BoxFit, LayoutSpacing, TextOverflow,
-    TextStyle, Theme,
+    BorderSlice, BorderStyle, BoxBorder, BoxDecoration, BoxFit, LayoutSpacing, TextAlign,
+    TextOverflow, TextStyle, Theme,
 };
 use aimer::{
     Align, Alignment, AnyWidget, BoxAlignment, BuildContext, Column, Container, Dimension,
-    Expanded, FontWeight, Icons, Key, NetworkImage, ProviderContext, Row, SizedBox, StatelessWidget,
-    StaticSvg, Svg, SvgStyle, Text, Widget,
+    Expanded, FontWeight, Icons, Key, Margin, NetworkImage, ProviderContext, Row, SizedBox,
+    StatelessWidget, StaticSvg, Svg, SvgStyle, Text, Widget,
 };
+use std::rc::Rc;
 
 const AVATAR_SIZE: f32 = 24.0;
-const ROW_HEIGHT: f32 = 28.0;
+const ROW_HEIGHT: f32 = 24.0;
 const ICON_SIZE: u32 = 16;
 /// The longest excerpt shown, in characters, before it is cut with an ellipsis.
 const EXCERPT_LIMIT: usize = 180;
@@ -76,61 +76,57 @@ impl StatelessWidget for TopicCard {
         // The card is a shared element: opening the post grows the page out of
         // it, and going back shrinks the page into it. The closure builds the
         // card afresh each time, since the transition draws its own copy.
-        SharedElement::new()
-            .tag(topic_tag(id))
-            .child_with(move || {
-                let mut children = vec![
-                    Text::new(title.clone())
+        SharedElement::new().tag(topic_tag(id)).child_with(move || {
+            let mut children = vec![
+                Text::new(title.clone())
+                    .text_style(
+                        TextStyle::new()
+                            .text_overflow(TextOverflow::Wrap)
+                            .font_weight(FontWeight::Bold)
+                            .font_size(20)
+                            .color(theme.on_surface_color()),
+                    )
+                    .boxed(),
+            ];
+
+            children.push(category_row(theme, &category));
+
+            if !excerpt.is_empty() {
+                children.push(
+                    Text::new(excerpt.clone())
                         .text_style(
                             TextStyle::new()
                                 .text_overflow(TextOverflow::Wrap)
-                                .font_weight(FontWeight::Bold)
-                                .font_size(20)
-                                .color(theme.on_surface_color()),
+                                .font_size(16)
+                                .color(theme.on_surface_color().with_opacity(160)),
                         )
                         .boxed(),
-                ];
-
-                children.push(category_row(theme, &category));
-
-                if !excerpt.is_empty() {
-                    children.push(
-                        Text::new(excerpt.clone())
-                            .text_style(
-                                TextStyle::new()
-                                    .text_overflow(TextOverflow::Wrap)
-                                    .font_size(16)
-                                    .color(theme.on_surface_color().with_opacity(160)),
-                            )
-                            .boxed(),
-                    );
-                }
-                children.push(stats_row(theme, likes, replies, views));
-
-                let header = header(
-                    theme,
-                    navigator.clone(),
-                    author.as_ref(),
-                    &fallback_name,
-                    since.clone(),
                 );
-                let navigator = navigator.clone();
-                let slug = slug.clone();
-                // The header sits outside the button: a button hides its child
-                // from pointer events, and the author must be tappable.
-                Container::new()
-                    .width(Dimension::Auto)
-                    .box_decoration(divider_decor(theme).background_color(theme.background_color()))
-                    .child(Column::new().children([
+            }
+            children.push(stats_row(theme, likes, replies, views));
+
+            let header = header(
+                theme,
+                navigator.clone(),
+                author.as_ref(),
+                &fallback_name,
+                since.clone(),
+            );
+            let navigator = navigator.clone();
+            let slug = slug.clone();
+            // The header sits outside the button: a button hides its child
+            // from pointer events, and the author must be tappable.
+            Container::new()
+                .width(Dimension::Auto)
+                .box_decoration(divider_decor(theme).background_color(theme.background_color()))
+                .child(
+                    Column::new().children([
                         Container::new()
                             .padding(LayoutSpacing::new().top(20).left(20).right(20))
                             .box_child(header),
                         Button::new()
                             .decoration(BoxDecoration::new())
-                            .hover_decoration(
-                                BoxDecoration::new()
-                                    .background_color(theme.primary_color().with_opacity(10)),
-                            )
+                            .hover_decoration(BoxDecoration::new())
                             .on_press(move || {
                                 navigator.push(AppRouter::PostDetail {
                                     slug: slug.clone(),
@@ -139,7 +135,9 @@ impl StatelessWidget for TopicCard {
                             })
                             .child(
                                 Container::new()
-                                    .padding(LayoutSpacing::new().top(6).left(20).right(20).bottom(20))
+                                    .padding(
+                                        LayoutSpacing::new().top(6).left(20).right(20).bottom(20),
+                                    )
                                     .child(
                                         Column::new()
                                             .gaps(LayoutSpacing::all(6))
@@ -147,8 +145,9 @@ impl StatelessWidget for TopicCard {
                                     ),
                             )
                             .boxed(),
-                    ]))
-            })
+                    ]),
+                )
+        })
     }
 }
 
@@ -288,12 +287,17 @@ fn category_pill(theme: ForumTheme, category: &Category) -> AnyWidget {
                     .gaps(LayoutSpacing::horizontal(6.into()))
                     .children([
                         icon(category_icon(&category.slug), accent),
-                        Text::new(category.name.clone())
-                            .text_style(
-                                TextStyle::new()
-                                    .font_weight(FontWeight::Bold)
-                                    .font_size(14)
-                                    .color(theme.background_color()),
+                        Margin::new()
+                            .margin(LayoutSpacing::new().bottom(4))
+                            .child(
+                                Text::new(category.name.clone())
+                                    .text_align(TextAlign::MidLeft)
+                                    .text_style(
+                                        TextStyle::new()
+                                            .font_weight(FontWeight::Bold)
+                                            .font_size(14)
+                                            .color(theme.background_color()),
+                                    ),
                             )
                             .boxed(),
                     ]),
@@ -387,7 +391,7 @@ fn icon(glyph: &'static StaticSvg, color: aimer::Color) -> AnyWidget {
 
 /// Turns the excerpt Discourse sends (HTML text with entities) into plain text
 /// of at most [`EXCERPT_LIMIT`] characters.
-fn clean_excerpt(raw: &str) -> String {
+pub(crate) fn clean_excerpt(raw: &str) -> String {
     let decoded = raw
         .replace("&hellip;", "…")
         .replace("&nbsp;", " ")

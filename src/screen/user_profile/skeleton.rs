@@ -56,20 +56,40 @@ impl StatelessWidget for SkeletonProfile {
     }
 }
 
-/// The avatar with the name, the handle, the role and the dates beside it.
+/// The card: the avatar with the name and three counts beside it, and the lines
+/// of the user's title, role and dates under them.
 fn header(bar: Color) -> AnyWidget {
-    Row::new()
-        .vertical_alignment(BoxAlignment::Center)
-        .gaps(LayoutSpacing::horizontal(16.into()))
+    let count = || {
+        Expanded::new().box_child(Column::new().gaps(LayoutSpacing::all(4)).children([
+            bar_px(bar, 20.0, 40.0),
+            bar_px(bar, 14.0, 52.0),
+        ]))
+    };
+    Column::new()
+        .gaps(LayoutSpacing::all(14))
         .children([
-            circle(bar, AVATAR_SIZE),
-            Expanded::new().box_child(Column::new().gaps(LayoutSpacing::all(4)).children([
-                bar_px(bar, 26.0, 170.0),
-                bar_px(bar, 16.0, 110.0),
-                bar_px(bar, 14.0, 130.0),
-                bar_px(bar, 14.0, 150.0),
-                bar_px(bar, 14.0, 120.0),
-            ])),
+            Row::new()
+                .vertical_alignment(BoxAlignment::Center)
+                .gaps(LayoutSpacing::horizontal(24.into()))
+                .children([
+                    circle(bar, AVATAR_SIZE),
+                    Expanded::new().box_child(Column::new().gaps(LayoutSpacing::all(10)).children([
+                        bar_px(bar, 18.0, 140.0),
+                        Row::new()
+                            .gaps(LayoutSpacing::horizontal(8.into()))
+                            .children([count(), count(), count()])
+                            .boxed(),
+                    ])),
+                ])
+                .boxed(),
+            Column::new()
+                .gaps(LayoutSpacing::all(4))
+                .children([
+                    bar_px(bar, 14.0, 120.0),
+                    bar_px(bar, 14.0, 150.0),
+                    bar_px(bar, 14.0, 110.0),
+                ])
+                .boxed(),
         ])
         .boxed()
 }
@@ -172,6 +192,7 @@ mod tests {
 
     /// A skeleton on its own, under the theme the app gives every screen.
     fn skeleton_app() -> aimer::HeadlessAimerApp<impl aimer::Widget + 'static> {
+        crate::testing::hold();
         let mut app = AimerApp::start_headless_with(
             AnimatedTheme::new().data(ForumTheme::light()).child(SkeletonProfile::new()),
             HeadlessOptions { size: PhysicalSize::new(450, 900), scale_factor: 1.0 },

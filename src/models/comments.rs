@@ -14,6 +14,7 @@ pub struct Comment {
     pub username: String,
     pub avatar_url: String,
     pub created_at: String,
+    pub like_count: i64,
     pub markdown: Rc<str>,
 }
 
@@ -25,6 +26,7 @@ impl Comment {
             username: post.username.clone(),
             avatar_url: avatar_url(&post.avatar_template, AVATAR_SIZE),
             created_at: post.created_at.clone(),
+            like_count: post.like_count(),
             markdown: html_to_markdown(&post.cooked),
         }
     }
@@ -126,6 +128,7 @@ mod tests {
             username: format!("user{post_number}"),
             avatar_url: String::new(),
             created_at: String::new(),
+            like_count: 0,
             markdown: Rc::from(""),
         })
     }

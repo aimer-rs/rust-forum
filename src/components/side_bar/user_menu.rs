@@ -1,17 +1,18 @@
 use std::time::Duration;
 
-use crate::components::general_button::GeneralButton;
 use crate::router::AppRouter;
 use crate::theme::ForumTheme;
 use aimer::animation::curves;
+use aimer::input::button::Button;
+use aimer::modal::{
+    Anchor, AnchorHandle, Floating, FloatingAlign, FloatingSide, ModalAnimation, ModalController,
+};
 use aimer::router::NavigatorController;
 use aimer::style::{BoxDecoration, BoxShadow, LayoutSpacing, TextAlign, TextStyle, Theme};
 use aimer::{
-    Align, AnyWidget, BoxAlignment, BuildContext, Color, Column, Container, Dimension, Row,
-    StatelessWidget, Text, Widget,
+    Align, AnyWidget, BoxAlignment, BuildContext, Color, Column, Container, Dimension, Padding,
+    Row, StatelessWidget, Text, Widget,
 };
-use aimer::input::button::Button;
-use aimer::modal::{Anchor, AnchorHandle, Floating, FloatingAlign, FloatingSide, ModalAnimation, ModalController};
 
 const AVATAR_SIZE: f32 = 28.0;
 const MENU_WIDTH: f32 = 220.0;
@@ -68,65 +69,26 @@ impl StatelessWidget for UserMenuButton {
     }
 }
 
-/// The user chip as a single circle, for the mobile pill. Pressing it opens the
-/// same account menu as [`UserMenuButton`], above the pill instead of below.
-#[derive(Clone, StatelessWidget)]
-pub struct UserAvatarButton {
-    size: f32,
-}
-
-impl UserAvatarButton {
-    pub fn new(size: f32) -> Self {
-        Self { size }
-    }
-}
-
-impl StatelessWidget for UserAvatarButton {
-    fn build(&self, ctx: &BuildContext) -> impl Widget {
-        let theme = *ForumTheme::of(ctx);
-        let navigator = NavigatorController::<AppRouter>::of(ctx);
-        let anchor = AnchorHandle::new();
-
-        let button = GeneralButton::with_child(
-            Container::new()
-                .width(Dimension::Px(self.size))
-                .height(Dimension::Px(self.size))
-                .child(Align::new().alignment(TextAlign::MidCenter).child(circular_avatar(theme))),
-            {
-                let anchor = anchor.clone();
-                move || {
-                    Floating::new()
-                        .anchor(anchor.clone())
-                        .side(FloatingSide::Top)
-                        .align(FloatingAlign::End)
-                        .gap(12.0)
-                        .animation(enter_animation())
-                        .child(menu_panel(theme, navigator.clone()))
-                        .show();
-                }
-            },
-        )
-        .width(self.size);
-
-        Anchor::new().handle(anchor).child(button)
-    }
-}
-
 /// A circular avatar placeholder: the accent colour with the user's initial.
 fn circular_avatar(theme: ForumTheme) -> impl Widget {
+    sized_avatar(theme, AVATAR_SIZE)
+}
+
+/// The avatar placeholder `size` across, as the icon of the account tab.
+pub fn sized_avatar(theme: ForumTheme, size: f32) -> impl Widget {
     Container::new()
-        .width(Dimension::Px(AVATAR_SIZE))
-        .height(Dimension::Px(AVATAR_SIZE))
+        .width(Dimension::Px(size))
+        .height(Dimension::Px(size))
         .box_decoration(
             BoxDecoration::new()
                 .background_color(theme.primary_color())
-                .border_radius(AVATAR_SIZE / 2.0),
+                .border_radius(size / 2.0),
         )
         .child(
             Align::new().alignment(TextAlign::MidCenter).child(
                 Text::new("U").text_style(
                     TextStyle::new()
-                        .font_size(14)
+                        .font_size((size * 0.5) as u32)
                         .color(theme.on_primary_color()),
                 ),
             ),

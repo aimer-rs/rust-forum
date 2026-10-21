@@ -1,32 +1,34 @@
 use crate::api::Api;
+use crate::components::avatar::round_avatar;
 use crate::components::profile_link::profile_link;
 use crate::router::AppRouter;
-use aimer::router::NavigatorController;
-use crate::components::topic_card::relative_time;
+use aimer::router::{Navigator, NavigatorController};
+use crate::components::topic_card::{format_count, relative_time};
 use crate::html_markdown::forum_markdown;
 use crate::models::comments::{Comment, CommentNode, build_comment_tree};
 use crate::models::posts::{Post, PostStream, PostsPage};
 use crate::store::{AppStore, CommentThread, StreamStatus};
 use crate::theme::ForumTheme;
-use aimer::input::button::Button;
 use aimer::style::{
-    BorderSlice, BorderStyle, BoxBorder, BoxDecoration, BoxFit, LayoutSpacing, TextOverflow, TextStyle,
-    Theme,
+    BorderSlice, BorderStyle, BoxBorder, BoxDecoration, LayoutSpacing, TextStyle, Theme,
 };
 use aimer::{
-    AnyWidget, AsyncBuilder, BuildContext, Column, Container, Expanded, FontWeight,
-    NetworkImage, ProviderContext, ProviderHandle, Row, SizedBox, State,
-    StateUpdater, StatefulWidget, StatelessWidget, Text, Widget, ZeroSizedBox,
+    AnyWidget, AsyncBuilder, BoxAlignment, BuildContext, Column, Container, Expanded, FontWeight,
+    Icons, ProviderContext, ProviderHandle, Row, SizedBox, StatelessWidget, StaticSvg, Svg,
+    SvgStyle, Text, Widget, ZeroSizedBox,
 };
 use std::collections::HashSet;
 use std::rc::Rc;
 
 /// How many posts one `posts.json` request asks for.
 const POSTS_PER_REQUEST: usize = 20;
-const AVATAR_DIAMETER: f32 = 36.0;
+const AVATAR_DIAMETER: f32 = 32.0;
+const ACTION_ICON_SIZE: u32 = 18;
+/// How far each level of replies is set in from the comment it answers.
+const INDENT: u32 = 14;
 /// How many levels of replies indent. Deeper ones stay at the last level's
 /// indent so a long chain keeps a readable width.
-const MAX_INDENT_DEPTH: usize = 4;
+const MAX_INDENT_DEPTH: usize = 5;
 
 /// The comments under a topic's first post, nested by who replied to whom.
 ///
@@ -169,8 +171,8 @@ fn comments_from(posts: &[Post]) -> Vec<Comment> {
         .collect()
 }
 
-/// A comment and, beneath it, a toggle for the replies to it.
-#[derive(StatefulWidget)]
+/// A comment and, beneath it, the replies to it, drawn along a guide line.
+#[derive(StatelessWidget)]
 struct CommentThreadView {
     node: Rc<CommentNode>,
     depth: usize,
@@ -182,112 +184,42 @@ impl CommentThreadView {
     }
 }
 
-struct CommentThreadViewState {
-    node: Rc<CommentNode>,
-    depth: usize,
-    /// Whether the replies beneath this comment are showing. Kept across
-    /// rebuilds, which happen whenever another batch of comments arrives.
-    expanded: bool,
-    updater: StateUpdater<Self>,
-}
-
-impl StatefulWidget for CommentThreadView {
-    type State = CommentThreadViewState;
-
-    fn create_state(self) -> Self::State {
-        CommentThreadViewState {
-            node: self.node,
-            depth: self.depth,
-            expanded: false,
-            updater: StateUpdater::new(),
-        }
-    }
-}
-
-impl State<CommentThreadView> for CommentThreadViewState {
-    fn init_state(&mut self, updater: StateUpdater<Self>) {
-        self.updater = updater;
-    }
-
-    fn adopt_config_from(&mut self, new: Self) {
-        self.node = new.node;
-        self.depth = new.depth;
-    }
-
+impl StatelessWidget for CommentThreadView {
     fn build(&self, ctx: &BuildContext) -> impl Widget {
         let theme = *ForumTheme::of(ctx);
         let mut parts: Vec<AnyWidget> = vec![CommentCard::new(self.node.comment.clone()).boxed()];
 
-        let reply_count = self.node.descendant_count();
-        if reply_count > 0 {
-            let updater = self.updater.clone();
-            let label = match (self.expanded, reply_count) {
-                (true, _) => "Hide replies".to_string(),
-                (false, 1) => "Show 1 reply".to_string(),
-                (false, n) => format!("Show {n} replies"),
+        if !self.node.replies.is_empty() {
+            let depth = self.depth + 1;
+            // Each level of replies sits behind a guide line of its own, drawn
+            // at the parent's edge; past the last level a chain stays flat.
+            let step = if self.depth < MAX_INDENT_DEPTH { INDENT } else { 0 };
+            let guide = BoxBorder {
+                left: BorderSlice::new()
+                    .style(BorderStyle::Solid)
+                    .stroke(if step > 0 { 2 } else { 0 })
+                    .color(theme.on_background_color().with_opacity(40)),
+                ..Default::default()
             };
             parts.push(
                 Container::new()
-                    .padding(LayoutSpacing::new().left(AVATAR_DIAMETER as u32 + 12))
+                    .padding(LayoutSpacing::new().left(step))
+                    .box_decoration(BoxDecoration::new().border(guide))
                     .child(
-                        Button::new()
-                            .decoration(BoxDecoration::new().border_radius(6))
-                            .hover_decoration(
-                                BoxDecoration::new()
-                                    .border_radius(6)
-                                    .background_color(theme.primary_color().with_alpha(0.12)),
-                            )
-                            .on_press(move || updater.set_state(|s| s.expanded = !s.expanded))
-                            .child(
-                                Container::new()
-                                    .padding(LayoutSpacing::all(6).left(8).right(8))
-                                    .child(Text::new(label).text_style(
-                                        TextStyle::new()
-                                            .font_size(14)
-                                            .font_weight(FontWeight::Bold)
-                                            .color(theme.primary_color()),
-                                    )),
-                            ),
+                        Column::new()
+                            .list(self.node.replies.clone())
+                            .builder(move |reply| CommentThreadView::new(reply.clone(), depth)),
                     )
                     .boxed(),
             );
-
-            if self.expanded {
-                let depth = self.depth + 1;
-                // Replies hang from the middle of their parent's avatar.
-                let step = if self.depth < MAX_INDENT_DEPTH {
-                    AVATAR_DIAMETER as u32 / 2
-                } else {
-                    0
-                };
-                let guide = BoxBorder {
-                    left: BorderSlice::new()
-                        .style(BorderStyle::Solid)
-                        .stroke(2)
-                        .color(theme.on_background_color().with_opacity(40)),
-                    ..Default::default()
-                };
-                parts.push(
-                    Container::new()
-                        .margin(LayoutSpacing::new().left(step))
-                        .padding(LayoutSpacing::new().left(step))
-                        .box_decoration(BoxDecoration::new().border(guide))
-                        .child(
-                            Column::new()
-                                .gaps(LayoutSpacing::all(6))
-                                .list(self.node.replies.clone())
-                                .builder(move |reply| CommentThreadView::new(reply.clone(), depth)),
-                        )
-                        .boxed(),
-                );
-            }
         }
 
-        Column::new().gaps(LayoutSpacing::all(4)).children(parts)
+        Column::new().children(parts)
     }
 }
 
-/// One comment: avatar, author and age, and the body.
+/// One comment: who wrote it and when on top, the body, and a row of actions
+/// at the right.
 #[derive(StatelessWidget)]
 struct CommentCard {
     comment: Rc<Comment>,
@@ -303,50 +235,68 @@ impl StatelessWidget for CommentCard {
     fn build(&self, ctx: &BuildContext) -> impl Widget {
         let theme = *ForumTheme::of(ctx);
         let comment = &self.comment;
-        let navigator = NavigatorController::<AppRouter>::of(ctx);
+        let navigator = Navigator::<AppRouter>::of(ctx);
+        let muted = theme.on_background_color().with_opacity(160);
 
-        let avatar = Container::new()
-            .width(AVATAR_DIAMETER)
-            .height(AVATAR_DIAMETER)
-            .box_decoration(BoxDecoration::new().border_radius(AVATAR_DIAMETER / 2.0))
-            .child(
-                NetworkImage::new(comment.avatar_url.clone())
-                    .width(AVATAR_DIAMETER)
-                    .height(AVATAR_DIAMETER)
-                    .fit(BoxFit::Cover)
-                    .loading_widget(
-                        SizedBox::new()
-                            .color(theme.primary_color().with_alpha(0.2)),
-                    ),
-            );
-
-        let header = Row::new().gaps(LayoutSpacing::all(8)).children([
-            profile_link(
-                navigator.clone(),
-                &comment.username,
-                Text::new(comment.username.clone()).text_style(
-                    TextStyle::new()
-                        .font_size(15)
-                        .font_weight(FontWeight::Bold)
-                        .color(theme.on_background_color()),
-                ),
-            ),
-            Text::new(relative_time(&comment.created_at))
-                .text_style(
-                    TextStyle::new()
-                        .font_size(13)
-                        .text_overflow(TextOverflow::Wrap)
-                        .color(theme.on_background_color().with_opacity(150)),
-                )
-                .boxed(),
-        ]);
+        let who = Row::new()
+            .vertical_alignment(BoxAlignment::Center)
+            .gaps(LayoutSpacing::horizontal(8.into()))
+            .children([
+                round_avatar(theme, &comment.avatar_url, &comment.username, AVATAR_DIAMETER),
+                Text::new(comment.username.clone())
+                    .text_style(
+                        TextStyle::new()
+                            .font_size(14)
+                            .font_weight(FontWeight::Bold)
+                            .color(theme.on_background_color()),
+                    )
+                    .boxed(),
+            ]);
+        let header = Row::new()
+            .vertical_alignment(BoxAlignment::Center)
+            .gaps(LayoutSpacing::horizontal(8.into()))
+            .children([
+                profile_link(navigator, &comment.username, who),
+                Text::new(format!("· {}", relative_time(&comment.created_at)))
+                    .text_style(TextStyle::new().font_size(14).color(muted))
+                    .boxed(),
+            ]);
 
         let body = forum_markdown(&comment.markdown, &theme, LayoutSpacing::new().top(2));
 
-        Row::new().gaps(LayoutSpacing::all(12)).children([
-            profile_link(navigator, &comment.username, avatar),
-            Expanded::new()
-                .box_child(Column::new().children([header.boxed(), body])),
-        ])
+        let actions = Row::new()
+            .vertical_alignment(BoxAlignment::Center)
+            .gaps(LayoutSpacing::horizontal(20.into()))
+            .children([
+                Expanded::new().box_child(SizedBox::new()),
+                action_icon(Icons::ELLIPSIS, muted),
+                action_icon(Icons::REPLY, muted),
+                Row::new()
+                    .vertical_alignment(BoxAlignment::Center)
+                    .gaps(LayoutSpacing::horizontal(6.into()))
+                    .children([
+                        action_icon(Icons::HEART, muted),
+                        Text::new(format_count(comment.like_count))
+                            .text_style(TextStyle::new().font_size(14).color(muted))
+                            .boxed(),
+                    ])
+                    .boxed(),
+            ]);
+
+        Container::new()
+            .padding(LayoutSpacing::vertical(10))
+            .child(
+                Column::new()
+                    .gaps(LayoutSpacing::all(6))
+                    .children([header.boxed(), body, actions.boxed()]),
+            )
     }
+}
+
+fn action_icon(glyph: &'static StaticSvg, color: aimer::Color) -> AnyWidget {
+    Svg::new(glyph)
+        .style("path", SvgStyle::new().stroke(color))
+        .width(ACTION_ICON_SIZE)
+        .height(ACTION_ICON_SIZE)
+        .boxed()
 }

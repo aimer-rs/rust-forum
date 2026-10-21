@@ -9,18 +9,49 @@ crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 
-# aimer = { git="https://github.com/Cottons29/aimer", branch = "main", features = ["provider", "markdown", "markdown-arborium", "svg", "icons"] }
-aimer = { path="../aimer", features = ["provider", "markdown", "markdown-arborium", "svg", "icons"] }
+# aimer = { git = "https://github.com/Cottons29/aimer", branch = "main", features = [
+#     "provider",
+#     "markdown",
+#     "markdown-syntect",
+#     "svg",
+#     "icons",
+# ] }
+aimer = { path = "../aimer", features = [
+    "provider",
+    "markdown",
+    "markdown-syntect",
+    "svg",
+    "icons",
+    "vault",
+] }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = "1.0.151"
-reqwest = { version = "0.13.4", default-features = false, features = ["native-tls", "http2"] }
+reqwest = { version = "0.13.4", default-features = false, features = [
+    "native-tls",
+    "http2",
+    "cookies",
+] }
 htmd = "0.5.5"
+iana-time-zone = "0.1"
 markup5ever_rcdom = "0.38"
 webbrowser = "1.2.4"
 tokio = { version = "1.53.1", features = ["time"] }
 [dev-dependencies]
-tokio = { version = "1.53.1", features = ["io-util", "macros", "net", "rt-multi-thread"] }
+tokio = { version = "1.53.1", features = [
+    "io-util",
+    "macros",
+    "net",
+    "rt-multi-thread",
+] }
 
 
 [profile.dev]
 debug = "line-tables-only"
+
+
+[profile.release]
+lto = true
+strip = "symbols"
+panic = "abort"
+codegen-units = 1
+opt-level = 3

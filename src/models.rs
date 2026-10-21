@@ -1,6 +1,7 @@
 pub mod categories;
 pub mod comments;
 pub mod posts;
+pub mod search;
 pub mod user;
 
 use serde::{Deserialize, Serialize};
