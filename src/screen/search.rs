@@ -11,7 +11,7 @@ use crate::store::AppStore;
 use crate::theme::ForumTheme;
 use aimer::animation::{AnimatedBuilder, AnimatedSwitcher, AnimationController, curves};
 use aimer::input::button::Button;
-use aimer::provider::media_query::MediaQuery;
+use aimer::screen::MediaQuery;
 use aimer::router::NavigatorController;
 use aimer::share::{ShareRef, Shared};
 use aimer::style::{LayoutSpacing, TextAlign, TextOverflow, TextStyle, Theme};

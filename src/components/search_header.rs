@@ -5,7 +5,7 @@ use crate::components::side_bar::glass;
 use crate::models::search::SearchMode;
 use crate::store::AppStore;
 use crate::theme::ForumTheme;
-use aimer::provider::media_query::MediaQuery;
+use aimer::screen::MediaQuery;
 use aimer::animation::{AnimationController, ImplicitAnimatedBuilder, curves};
 use aimer::FocusNode;
 use aimer::input::TextEditingController;

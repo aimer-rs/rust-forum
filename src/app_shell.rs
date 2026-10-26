@@ -12,7 +12,7 @@ use crate::theme::ForumTheme;
 use aimer::Dimension::Percent;
 use aimer::animation::{AnimationController, AnimationStatus, StatusListener, curves};
 use aimer::share::ShareRef;
-use aimer::provider::media_query::MediaQuery;
+use aimer::screen::MediaQuery;
 use aimer::router::{Navigator, Outlet};
 use aimer::style::{AnimatedTheme, Theme, ThemeMode};
 use aimer::*;

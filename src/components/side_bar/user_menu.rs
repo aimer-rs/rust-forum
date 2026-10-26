@@ -58,7 +58,10 @@ impl StatelessWidget for UserMenuButton {
                     "" => String::new(),
                     template => avatar_url(template, 64),
                 };
-                (round_avatar(theme, &url, &member.username, AVATAR_SIZE), member.username.clone())
+                (
+                    round_avatar(theme, &url, &member.username, AVATAR_SIZE),
+                    member.username.clone(),
+                )
             }
             None => (guest_icon(theme), "Sign in".to_string()),
         };
@@ -138,11 +141,7 @@ pub fn sized_avatar(theme: ForumTheme, size: f32) -> impl Widget {
 }
 
 /// The dropdown panel: a rounded, shadowed card holding one row per action.
-fn menu_panel(
-    theme: ForumTheme,
-    store: ProviderHandle<AppStore>,
-    signed_in: bool,
-) -> impl Widget {
+fn menu_panel(theme: ForumTheme, store: ProviderHandle<AppStore>, signed_in: bool) -> impl Widget {
     let border = theme.box_decor().border;
 
     // Each opens in a window of its own, not as a page of the app.
@@ -169,7 +168,9 @@ fn menu_panel(
 
     Container::new()
         .width(Dimension::Px(MENU_WIDTH))
-        .height(Dimension::Px(items.len() as f32 * MENU_ITEM_HEIGHT + MENU_PADDING * 2.5))
+        .height(Dimension::Px(
+            items.len() as f32 * MENU_ITEM_HEIGHT + MENU_PADDING * 2.5,
+        ))
         .padding(LayoutSpacing::all(MENU_PADDING as u32))
         .box_decoration(
             BoxDecoration::new()
@@ -189,42 +190,39 @@ fn menu_panel(
 /// A single selectable menu row. Selecting it runs `on_select` and dismisses
 /// the panel.
 fn menu_item(label: &'static str, theme: ForumTheme, on_select: impl Fn() + 'static) -> AnyWidget {
-    Container::new()
-        .height(Dimension::Px(MENU_ITEM_HEIGHT))
-        .child(
-            Button::new()
-                .hover_decoration(
-                    BoxDecoration::new()
-                        .background_color(theme.primary_color().with_alpha(0.2))
-                        .border_radius(8),
-                )
-                .press_decoration(
-                    BoxDecoration::new()
-                        .background_color(theme.primary_color().with_alpha(0.45))
-                        .border_radius(8),
-                )
-                .on_press(move || {
-                    on_select();
-                    ModalController::dismiss_top();
-                })
-                .decoration(
-                    BoxDecoration::new()
-                        .background_color(Color::Transparent)
-                        .border_radius(8),
-                )
+    Button::new()
+        .hover_decoration(
+            BoxDecoration::new()
+                .background_color(theme.primary_color().with_alpha(0.2))
+                .border_radius(8),
+        )
+        .press_decoration(
+            BoxDecoration::new()
+                .background_color(theme.primary_color().with_alpha(0.45))
+                .border_radius(8),
+        )
+        .on_press(move || {
+            on_select();
+            ModalController::dismiss_top();
+        })
+        .decoration(
+            BoxDecoration::new()
+                .background_color(Color::Transparent)
+                .border_radius(8),
+        )
+        .box_child(
+            Container::new()
+                .height(Dimension::Px(MENU_ITEM_HEIGHT))
+                .width(Dimension::Percent(100f32))
+                .padding(LayoutSpacing::new().left(12))
                 .child(
-                    Container::new()
-                        .padding(LayoutSpacing::new().left(12))
-                        .child(
-                            Text::new(label).text_align(TextAlign::MidLeft).text_style(
-                                TextStyle::new()
-                                    .font_size(16)
-                                    .color(theme.on_surface_color()),
-                            ),
-                        ),
+                    Text::new(label).text_align(TextAlign::MidLeft).text_style(
+                        TextStyle::new()
+                            .font_size(16)
+                            .color(theme.on_surface_color()),
+                    ),
                 ),
         )
-        .boxed()
 }
 
 /// The enter/exit transition shared by the dropdown.
@@ -240,10 +238,10 @@ fn enter_animation() -> ModalAnimation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::router::AppRouter;
     use crate::screen::settings::widgets::testing;
     use crate::store::DialogPage;
     use aimer::quiver::winit::dpi::PhysicalSize;
-    use crate::router::AppRouter;
     use aimer::router::{Navigator, NavigatorController};
     use aimer::style::AnimatedTheme;
     use aimer::{AimerApp, HeadlessOptions, Provider, StatelessWidget};
@@ -264,7 +262,9 @@ mod tests {
             let navigator = NavigatorController::<AppRouter>::of(ctx);
             let signed_in = store.read().current_user.is_some();
             SEEN.with(|seen| *seen.borrow_mut() = Some((store.clone(), navigator.clone())));
-            AnimatedTheme::new().data(ForumTheme::light()).child(Themed { store, signed_in })
+            AnimatedTheme::new()
+                .data(ForumTheme::light())
+                .child(Themed { store, signed_in })
         }
     }
 
@@ -277,11 +277,13 @@ mod tests {
 
     impl StatelessWidget for Themed {
         fn build(&self, ctx: &BuildContext) -> impl Widget {
-            Align::new().alignment(aimer::Alignment::TopLeft).child(menu_panel(
-                *ForumTheme::of(ctx),
-                self.store.clone(),
-                self.signed_in,
-            ))
+            Align::new()
+                .alignment(aimer::Alignment::TopLeft)
+                .child(menu_panel(
+                    *ForumTheme::of(ctx),
+                    self.store.clone(),
+                    self.signed_in,
+                ))
         }
     }
 
@@ -295,14 +297,25 @@ mod tests {
             Provider::new()
                 .create(move || store.clone())
                 .child(Navigator::new(AppRouter::Latest, |_| MenuPanel.boxed())),
-            HeadlessOptions { size: PhysicalSize::new(400, 300), scale_factor: 1.0 },
+            HeadlessOptions {
+                size: PhysicalSize::new(400, 300),
+                scale_factor: 1.0,
+            },
         );
         testing::settle(&mut app);
         app
     }
 
     fn user() -> Option<String> {
-        SEEN.with(|seen| seen.borrow().as_ref().unwrap().0.read().current_user.clone())
+        SEEN.with(|seen| {
+            seen.borrow()
+                .as_ref()
+                .unwrap()
+                .0
+                .read()
+                .current_user
+                .clone()
+        })
     }
 
     fn route() -> AppRouter {

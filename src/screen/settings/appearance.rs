@@ -8,7 +8,7 @@ use crate::components::theme_selector::ThemeSelector;
 use crate::preferences::{self, NavTab, NavbarTabs};
 use crate::store::AppStore;
 use crate::theme::ForumTheme;
-use aimer::provider::media_query::MediaQuery;
+use aimer::screen::MediaQuery;
 use aimer::style::{BoxDecoration, LayoutSpacing, Theme};
 use aimer::{
     Align, Alignment, AnyWidget, BuildContext, Column, Container, Dimension, ProviderContext,

@@ -1,5 +1,5 @@
 use aimer::input::mouse_region::MouseRegion;
-use aimer::provider::media_query::MediaQuery;
+use aimer::screen::MediaQuery;
 use aimer::style::{LayoutSpacing, TextAlign, TextStyle};
 use aimer::{
     Align, Alignment, AnyWidget, BuildContext, Color, Container, MarkdownCustomBlock,

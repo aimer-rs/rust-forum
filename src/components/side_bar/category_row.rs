@@ -63,7 +63,10 @@ impl StatelessWidget for CategoryRow {
                 }
             })
             .child(
-                Container::new().padding(LayoutSpacing::vertical(8)).child(
+                Container::new()
+                    .width(Dimension::Percent(100f32))
+                    .padding(LayoutSpacing::vertical(8))
+                    .child(
                     Row::new()
                         .vertical_alignment(BoxAlignment::Center)
                         .gaps(LayoutSpacing::all(10))

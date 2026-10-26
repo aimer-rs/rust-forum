@@ -22,8 +22,8 @@ use aimer::native::macos_windowing::MacosWindowing;
 use aimer::router::{Navigator, NavigatorController};
 use aimer::style::{LayoutSpacing, TextAlign, TextStyle, Theme};
 use aimer::{
-    Align, Alignment, AnyWidget, BuildContext, Container, ProviderContext, ProviderHandle, Stack,
-    StatelessWidget, Text, Widget, Window, WindowAttr, ZeroSizedBox,
+    Align, Alignment, AnyWidget, BuildContext, Container, Dimension, ProviderContext,
+    ProviderHandle, Stack, StatelessWidget, Text, Widget, Window, WindowAttr, ZeroSizedBox,
 };
 use std::cell::{Cell, RefCell};
 
@@ -133,11 +133,16 @@ fn declared<W: Widget + 'static>(
 }
 
 fn dialog_attr() -> WindowAttr {
-    WindowAttr::new().title("Settings").inner_size(DIALOG_SIZE.0, DIALOG_SIZE.1).decorations(false)
+    WindowAttr::new()
+        .title("Settings")
+        .inner_size(DIALOG_SIZE.0, DIALOG_SIZE.1)
+        .decorations(false)
 }
 
 fn profile_attr() -> WindowAttr {
-    WindowAttr::new().title("Profile").inner_size(PROFILE_SIZE.0, PROFILE_SIZE.1)
+    WindowAttr::new()
+        .title("Profile")
+        .inner_size(PROFILE_SIZE.0, PROFILE_SIZE.1)
 }
 
 /// Declares the windows of the app. It paints nothing and takes no room.
@@ -165,16 +170,26 @@ impl StatelessWidget for WindowsLayer {
         // Both are always in the tree, so each keeps its place: a window is closed
         // by being declared shut, not by being left out.
         Stack::new().children([
-            declared(&store, dialog_attr(), dialog.is_some(), |w| w.dialog = None, move |_ctx| {
-                let first = match dialog {
-                    Some(DialogPage::Login) => AppRouter::Login,
-                    _ => AppRouter::Settings,
-                };
-                Navigator::new(first, |route| DialogRoute(route).boxed())
-            }),
-            declared(&store, profile_attr(), profile, |w| w.profile = false, |_ctx| {
-                AccountScreen::new(Placement::Window)
-            }),
+            declared(
+                &store,
+                dialog_attr(),
+                dialog.is_some(),
+                |w| w.dialog = None,
+                move |_ctx| {
+                    let first = match dialog {
+                        Some(DialogPage::Login) => AppRouter::Login,
+                        _ => AppRouter::Settings,
+                    };
+                    Navigator::new(first, |route| DialogRoute(route).boxed())
+                },
+            ),
+            declared(
+                &store,
+                profile_attr(),
+                profile,
+                |w| w.profile = false,
+                |_ctx| AccountScreen::new(Placement::Window),
+            ),
         ])
     }
 }
@@ -205,35 +220,44 @@ impl StatelessWidget for DialogRoute {
 
 fn blank(ctx: &BuildContext) -> AnyWidget {
     let theme = *ForumTheme::of(ctx);
-    Container::new().color(theme.background_color()).child(ZeroSizedBox).boxed()
+    Container::new()
+        .color(theme.background_color())
+        .child(ZeroSizedBox)
+        .boxed()
 }
 
 /// `page` with the button that goes back a page, when there is one, over its top
 /// left, and the button that closes the window over its top right.
-fn with_buttons(ctx: &BuildContext, page: AnyWidget, navigator: NavigatorController<AppRouter>) -> AnyWidget {
+fn with_buttons(
+    ctx: &BuildContext,
+    page: AnyWidget,
+    navigator: NavigatorController<AppRouter>,
+) -> AnyWidget {
     let theme = *ForumTheme::of(ctx);
     let store = ProviderHandle::<AppStore>::of(ctx);
     let mut layers = vec![page];
     if navigator.can_pop() {
         layers.push(
             Align::new().alignment(Alignment::TopLeft).box_child(
-                Container::new().padding(LayoutSpacing::new().top(BAR_TOP).left(BAR_INSET)).child(button(
-                    theme,
-                    "Back",
-                    move || {
+                Container::new()
+                    .padding(LayoutSpacing::new().top(BAR_TOP).left(BAR_INSET))
+                    .child(button(theme, "Back", move || {
                         if navigator.can_pop() {
                             navigator.pop();
                         }
-                    },
-                )),
+                    })),
             ),
         );
     }
     layers.push(
         Align::new().alignment(Alignment::TopRight).box_child(
             Container::new()
+                .height(50)
+                .height(50)
                 .padding(LayoutSpacing::new().top(BAR_TOP).right(BAR_INSET))
-                .child(button(theme, "Close", move || store.update(|store| store.windows.dialog = None))),
+                .child(button(theme, "Close", move || {
+                    store.update(|store| store.windows.dialog = None)
+                })),
         ),
     );
     Stack::new().children(layers).boxed()
@@ -242,11 +266,17 @@ fn with_buttons(ctx: &BuildContext, page: AnyWidget, navigator: NavigatorControl
 /// A button of the app's own kind, labelled `label`.
 fn button(theme: ForumTheme, label: &'static str, on_press: impl Fn() + 'static) -> AnyWidget {
     GeneralButton::with_child(
-        Container::new().padding(LayoutSpacing::new().top(8).bottom(8)).child(
-            Text::new(label)
-                .text_align(TextAlign::MidCenter)
-                .text_style(TextStyle::new().font_size(16).color(theme.on_background_color())),
-        ),
+        Container::new()
+            .padding(LayoutSpacing::new().top(8).bottom(8))
+            .child(
+                Text::new(label)
+                    .text_align(TextAlign::MidCenter)
+                    .text_style(
+                        TextStyle::new()
+                            .font_size(16)
+                            .color(theme.on_background_color()),
+                    ),
+            ),
         on_press,
     )
     .width(BAR_BUTTON_WIDTH)
@@ -280,7 +310,9 @@ mod tests {
                     NavigatorController::<AppRouter>::of(ctx),
                 ))
             });
-            AnimatedTheme::new().data(ForumTheme::light()).child(WindowsLayer)
+            AnimatedTheme::new()
+                .data(ForumTheme::light())
+                .child(WindowsLayer)
         }
     }
 
@@ -293,7 +325,10 @@ mod tests {
             Provider::new()
                 .create(move || store.clone())
                 .child(Navigator::new(AppRouter::Latest, |_| Host.boxed())),
-            HeadlessOptions { size: PhysicalSize::new(1100, 800), scale_factor: 1.0 },
+            HeadlessOptions {
+                size: PhysicalSize::new(1100, 800),
+                scale_factor: 1.0,
+            },
         );
         testing::settle(&mut app);
         app
@@ -403,7 +438,10 @@ mod tests {
         assert!(store().read().windows.dialog.is_some() && store().read().windows.profile);
         // The dialog was declared first: closing it leaves the other open.
         closers.remove(0)();
-        assert!(store().read().windows.dialog.is_none(), "it would not open again");
+        assert!(
+            store().read().windows.dialog.is_none(),
+            "it would not open again"
+        );
         assert!(store().read().windows.profile);
         closers.remove(0)();
         assert!(!store().read().windows.profile);
@@ -416,10 +454,16 @@ mod tests {
         store().update(|store| store.sign_in("domma".to_owned()));
         testing::settle(&mut app);
         assert!(
-            drain().iter().any(|request| matches!(request, Request::Command(_, WindowCommand::Close))),
+            drain()
+                .iter()
+                .any(|request| matches!(request, Request::Command(_, WindowCommand::Close))),
             "the window stayed open"
         );
-        assert_eq!(store().read().windows.dialog, None, "it would open again on signing out");
+        assert_eq!(
+            store().read().windows.dialog,
+            None,
+            "it would open again on signing out"
+        );
     }
 
     #[test]
@@ -428,7 +472,11 @@ mod tests {
         drain();
         store().update(|store| store.sign_in("domma".to_owned()));
         testing::settle(&mut app);
-        assert!(!drain().iter().any(|request| matches!(request, Request::Command(_, WindowCommand::Close))));
+        assert!(
+            !drain()
+                .iter()
+                .any(|request| matches!(request, Request::Command(_, WindowCommand::Close)))
+        );
         assert_eq!(store().read().windows.dialog, Some(DialogPage::Settings));
     }
 
@@ -441,7 +489,11 @@ mod tests {
         drain();
         store().update(|store| store.sign_out());
         testing::settle(&mut app);
-        assert!(drain().iter().any(|request| matches!(request, Request::Command(_, WindowCommand::Close))));
+        assert!(
+            drain()
+                .iter()
+                .any(|request| matches!(request, Request::Command(_, WindowCommand::Close)))
+        );
         assert!(!store().read().windows.profile);
     }
 
@@ -472,7 +524,10 @@ mod tests {
                     .data(ForumTheme::light())
                     .child(Navigator::new(first, |route| Pages(route).boxed())),
             ),
-            HeadlessOptions { size: PhysicalSize::new(640, 760), scale_factor: 1.0 },
+            HeadlessOptions {
+                size: PhysicalSize::new(640, 760),
+                scale_factor: 1.0,
+            },
         );
         testing::settle(&mut app);
         app
@@ -582,7 +637,13 @@ mod tests {
         push(AppRouter::Login);
         testing::settle(&mut app);
         // What the sign-in pages do once the forum has said yes.
-        SEEN.with(|seen| seen.borrow().as_ref().unwrap().1.set_route(AppRouter::Account));
+        SEEN.with(|seen| {
+            seen.borrow()
+                .as_ref()
+                .unwrap()
+                .1
+                .set_route(AppRouter::Account)
+        });
         store().update(|store| store.sign_in("domma".to_owned()));
         testing::settle(&mut app);
         assert_eq!(store().read().windows.dialog, Some(DialogPage::Settings));

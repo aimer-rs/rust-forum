@@ -3,8 +3,7 @@ use crate::theme::ForumTheme;
 use aimer::router::Navigator;
 use aimer::style::{BoxDecoration, LayoutSpacing, TextStyle, Theme};
 use aimer::{
-    BoxAlignment, BuildContext, Color, Container, Icons, Row, StatelessWidget, Svg, SvgAsset,
-    SvgStyle, Text, Widget, case,
+    BoxAlignment, BuildContext, Color, Container, Dimension, Icons, Row, StatelessWidget, Svg, SvgAsset, SvgStyle, Text, Widget, case,
 };
 use aimer::input::button::Button;
 
@@ -58,6 +57,7 @@ impl StatelessWidget for NavigationRow {
             })
             .child(
                 Container::new()
+                    .width(Dimension::Percent(100f32))
                     .padding(LayoutSpacing::vertical(6).left(18))
                     .child(
                         Row::new()
@@ -124,6 +124,7 @@ impl StatelessWidget for SearchRow {
             })
             .child(
                 Container::new()
+                    .width(Dimension::Percent(100f32))
                     .padding(LayoutSpacing::vertical(6).left(18))
                     .child(
                         Row::new()
