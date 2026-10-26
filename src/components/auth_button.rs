@@ -55,7 +55,11 @@ fn pill(
     label: &str,
     on_press: impl Fn() + 'static,
 ) -> AnyWidget {
-    let ink = if filled { theme.on_primary_color() } else { theme.on_background_color() };
+    let ink = if filled {
+        theme.on_primary_color()
+    } else {
+        theme.on_background_color()
+    };
     let shape = || BoxDecoration::new().border_radius(BUTTON_HEIGHT / 2.0);
     let (rest, hover, press) = if filled {
         (
@@ -80,7 +84,12 @@ fn pill(
     };
 
     let text = Text::new(label.to_string())
-        .text_style(TextStyle::new().font_weight(FontWeight::Bold).font_size(17).color(ink))
+        .text_style(
+            TextStyle::new()
+                .font_weight(FontWeight::Bold)
+                .font_size(17)
+                .color(ink),
+        )
         .boxed();
     let content = match glyph {
         Some(glyph) => Row::new()
@@ -91,16 +100,22 @@ fn pill(
         None => text,
     };
 
-    full_width(
-        Button::new()
-            .decoration(rest)
-            .hover_decoration(hover)
-            .press_decoration(press)
-            .on_press(on_press)
-            // A line takes room from inside the pill, so the outlined one is a
-            // little shorter within it to be as tall as the filled one.
-            .child(button_face(content, if filled { 0.0 } else { 2.0 * OUTLINE_WIDTH as f32 })),
-    )
+    Button::new()
+        .decoration(rest)
+        .hover_decoration(hover)
+        .press_decoration(press)
+        .on_press(on_press)
+        // A line takes room from inside the pill, so the outlined one is a
+        // little shorter within it to be as tall as the filled one.
+        .child(full_width(button_face(
+            content,
+            if filled {
+                0.0
+            } else {
+                2.0 * OUTLINE_WIDTH as f32
+            },
+        )))
+        .notype()
 }
 
 fn glyph_icon(glyph: Glyph, color: Color) -> AnyWidget {
@@ -145,7 +160,9 @@ pub fn text_button(
 /// Gives `widget` the whole width of the column it is in: a button is only as wide
 /// as what is in it, unless a row hands it the room.
 pub fn full_width(widget: impl Widget + 'static) -> AnyWidget {
-    Row::new().children([Expanded::new().box_child(widget)]).boxed()
+    Container::new()
+        .width(Dimension::Percent(100f32))
+        .box_child(widget)
 }
 
 /// The room a button's contents are centred in, as wide as the button and
