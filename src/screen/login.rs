@@ -5,10 +5,12 @@ mod password;
 pub use email_code::EmailCodeScreen;
 pub use password::PasswordScreen;
 
+use crate::api::session::{self, PasskeyOutcome};
 use crate::app_shell::{MOBILE_TOP, is_mobile};
 use crate::components::auth_button::{Glyph, filled_icon_button, outlined_button, text_button};
 use crate::components::page_title::PageTitle;
 use crate::router::AppRouter;
+use crate::store::AppStore;
 use crate::theme::ForumTheme;
 use aimer::input::button::Button;
 use aimer::router::NavigatorController;
@@ -16,10 +18,16 @@ use aimer::share::ShareRef;
 use aimer::style::{BoxDecoration, LayoutSpacing, TextAlign, TextOverflow, TextStyle, Theme};
 use aimer::{
     Align, Alignment, AnyWidget, BoxAlignment, BuildContext, Color, Column, Container, Dimension,
-    Expanded, FontWeight, Icons, Row, Scrollable, SizedBox, State, StateUpdater, StatefulWidget,
-    Svg, SvgStyle, Text, Widget, case,
+    Expanded, FontWeight, FutureSnapshotExt, Icons, ProviderHandle, Row, Scrollable, SizedBox,
+    SnapshotTask, State, StateUpdater, StatefulWidget, Svg, SvgStyle, Text, Widget, case,
 };
+use std::rc::Rc;
 
+/// Whether the page offers GitHub and a passkey. Neither works with this forum
+/// yet: GitHub needs a web view to carry the forum's sign-in back to the app, and
+/// the forum has not authorised the app for its passkeys. The code for both is
+/// kept, so switching this on brings them back.
+const OTHER_WAYS_IN: bool = false;
 const GITHUB_ICON: &str = include_str!("../../assets/github.svg");
 /// How the form shares a wide window: the margins at each side and the form.
 const WIDE_MARGIN_FLEX: f32 = 1.0;
@@ -31,19 +39,37 @@ const BOTTOM_MARGIN: f32 = 24.0;
 const TERMS_URL: &str = "https://users.rust-lang.org/tos";
 const GUIDELINES_URL: &str = "https://users.rust-lang.org/faq";
 
-/// The page to sign in from: the forum's mark over the ways in (GitHub, a
-/// passkey, a one-time code emailed to the member, or a username and password),
-/// the last two of which have pages of their own; see [`EmailCodeScreen`] and
-/// [`PasswordScreen`].
-///
-/// Only the pages are here for now. Nothing is sent to the forum, so every way in
-/// ends in a note saying it isn't connected yet (the pages say so up front too).
+/// The page to sign in from: the forum's mark over the ways in (a one-time code
+/// emailed to the member, or a username and password, and with [`OTHER_WAYS_IN`]
+/// GitHub and a passkey too), the first two of which have pages of their own; see
+/// [`EmailCodeScreen`] and [`PasswordScreen`].
 #[derive(Clone, StatefulWidget)]
-pub struct LoginScreen;
+pub struct LoginScreen {
+    /// Whether the page has a way to leave without signing in. A window to sign
+    /// in from has the window's own.
+    skippable: bool,
+}
+
+impl LoginScreen {
+    /// The page of the app.
+    pub fn page() -> Self {
+        Self { skippable: true }
+    }
+
+    /// The first page of the window to sign in from.
+    pub fn window() -> Self {
+        Self { skippable: false }
+    }
+}
 
 pub struct LoginState {
+    skippable: bool,
     /// What the last press came to, shown above the terms.
     message: Option<String>,
+    /// The passkey sign-in that is out, if one is: the system's sheet is up, or
+    /// the forum is being asked. Holding it is what keeps it alive; leaving the
+    /// page drops it.
+    request: Option<SnapshotTask<(), String>>,
     updater: StateUpdater<Self>,
 }
 
@@ -52,7 +78,9 @@ impl StatefulWidget for LoginScreen {
 
     fn create_state(self) -> Self::State {
         LoginState {
+            skippable: self.skippable,
             message: None,
+            request: None,
             updater: StateUpdater::new(),
         }
     }
@@ -63,8 +91,46 @@ impl LoginState {
         self.message = Some("Signing in with GitHub isn't available yet.".into());
     }
 
-    fn sign_in_with_passkey(&mut self) {
-        self.message = Some("Signing in with a passkey isn't available yet.".into());
+    fn passkey_pending(&self) -> bool {
+        self.request.is_some()
+    }
+
+    /// Asks the device for a passkey and the forum to accept it, unless that is
+    /// already under way. A member who is in is handed to `signed_in` and the page
+    /// is left to it.
+    fn sign_in_with_passkey(&mut self, signed_in: Rc<dyn Fn(String)>) {
+        if self.passkey_pending() {
+            return;
+        }
+        self.message = None;
+        let updater = self.updater;
+        self.request = Some(
+            async move {
+                match session::sign_in_with_passkey().await {
+                    Ok(PasskeyOutcome::SignedIn(username)) => {
+                        signed_in(username);
+                        Ok(())
+                    }
+                    Ok(PasskeyOutcome::Cancelled) => {
+                        updater.set_state(|state| state.passkey_done(None));
+                        Ok(())
+                    }
+                    Err(note) => {
+                        let shown = note.clone();
+                        updater.set_state(move |state| state.passkey_done(Some(shown)));
+                        Err(note)
+                    }
+                }
+            }
+            .waitme(),
+        );
+    }
+
+    /// The passkey sign-in ended without signing in: with a `note` for the member
+    /// to read, or none when they only closed the sheet.
+    fn passkey_done(&mut self, note: Option<String>) {
+        self.request = None;
+        self.message = note;
     }
 }
 
@@ -79,7 +145,13 @@ impl State<LoginScreen> for LoginState {
         let theme = *ForumTheme::of(ctx);
         let navigator = NavigatorController::<AppRouter>::of(ctx);
         let updater = self.updater;
-        let (to_email, to_password, skip) = (navigator.clone(), navigator.clone(), navigator);
+        let store = ProviderHandle::<AppStore>::of(ctx);
+        let (to_email, to_password, skip) = (navigator.clone(), navigator.clone(), navigator.clone());
+        let signed_in: Rc<dyn Fn(String)> = Rc::new(move |username| {
+            store.update(|store| store.sign_in(username));
+            navigator.set_route(AppRouter::Account);
+        });
+        let waiting = self.passkey_pending();
 
         // One column, so that the pills are given the width of the page: see
         // `form_page`.
@@ -93,35 +165,43 @@ impl State<LoginScreen> for LoginState {
                     .alignment(Alignment::MidCenter)
                     .child(brand(theme)),
             ),
-            filled_icon_button(
+        ];
+        if OTHER_WAYS_IN {
+            page.push(filled_icon_button(
                 theme,
                 Glyph::Embedded(GITHUB_ICON),
                 "Continue with GitHub",
                 move || updater.set_state(|state| state.sign_in_with_github()),
-            ),
-            outlined_button(
+            ));
+            page.push(outlined_button(
                 theme,
                 Some(Glyph::Lucide(Icons::FINGERPRINT_PATTERN)),
-                "Continue with a passkey",
-                move || updater.set_state(|state| state.sign_in_with_passkey()),
-            ),
-            outlined_button(
-                theme,
-                Some(Glyph::Lucide(Icons::MAIL)),
-                "Email me a one-time code",
-                move || to_email.push(AppRouter::LoginEmail),
-            ),
-            outlined_button(theme, None, "Log in with a username", move || {
-                to_password.push(AppRouter::LoginPassword)
-            }),
-            text_button("Skip", theme.on_background_color(), 17, move || {
+                if waiting { "Waiting for your passkey…" } else { "Continue with a passkey" },
+                move || {
+                    let signed_in = signed_in.clone();
+                    updater.set_state(move |state| state.sign_in_with_passkey(signed_in))
+                },
+            ));
+        }
+        // The one-time code is the way in to lead with when it is the first of them.
+        let email_code = move || to_email.push(AppRouter::LoginEmail);
+        page.push(if OTHER_WAYS_IN {
+            outlined_button(theme, Some(Glyph::Lucide(Icons::MAIL)), "Email me a one-time code", email_code)
+        } else {
+            filled_icon_button(theme, Glyph::Lucide(Icons::MAIL), "Email me a one-time code", email_code)
+        });
+        page.push(outlined_button(theme, None, "Log in with a username", move || {
+            to_password.push(AppRouter::LoginPassword)
+        }));
+        if self.skippable {
+            page.push(text_button("Skip", theme.on_background_color(), 17, move || {
                 if skip.can_pop() {
                     skip.pop();
                 } else {
                     skip.push(AppRouter::Latest);
                 }
-            }),
-        ];
+            }));
+        }
         if let Some(message) = &self.message {
             page.push(note(theme, message));
         }
@@ -355,8 +435,14 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn each_way_in_that_stays_on_the_page_ends_in_a_note_that_it_is_not_available_yet() {
-        let mut state = LoginScreen.create_state();
+    fn the_page_of_the_app_can_be_skipped_and_the_window_leaves_that_to_its_own_close_button() {
+        assert!(LoginScreen::page().create_state().skippable);
+        assert!(!LoginScreen::window().create_state().skippable);
+    }
+
+    #[test]
+    fn github_ends_in_a_note_that_it_is_not_available_yet() {
+        let mut state = LoginScreen::page().create_state();
         assert!(state.message.is_none());
         state.sign_in_with_github();
         assert!(
@@ -365,13 +451,27 @@ mod tests {
                 .as_deref()
                 .is_some_and(|m| m.contains("GitHub"))
         );
-        state.sign_in_with_passkey();
-        assert!(
-            state
-                .message
-                .as_deref()
-                .is_some_and(|m| m.contains("passkey"))
-        );
+    }
+
+    #[test]
+    fn a_passkey_that_failed_shows_why_and_a_closed_sheet_shows_nothing() {
+        let mut state = LoginScreen::page().create_state();
+        assert!(!state.passkey_pending());
+        state.passkey_done(Some("No passkey.".into()));
+        assert_eq!(state.message.as_deref(), Some("No passkey."));
+        state.passkey_done(None);
+        assert_eq!(state.message, None);
+    }
+
+    #[test]
+    fn a_passkey_press_while_one_is_out_starts_nothing_more() {
+        let mut state = LoginScreen::page().create_state();
+        state.sign_in_with_passkey(Rc::new(|_| {}));
+        assert!(state.passkey_pending());
+        state.message = Some("kept".into());
+        state.sign_in_with_passkey(Rc::new(|_| {}));
+        // The second press left alone even the note the first would have cleared.
+        assert_eq!(state.message.as_deref(), Some("kept"));
     }
 
     /// The app on `route` in a window `width` wide, settled, and the nodes it
@@ -407,10 +507,10 @@ mod tests {
     #[test]
     fn the_login_page_builds_and_paints_under_its_bar() {
         // The shell paints about 45 nodes with its tab bar gone from these pages;
-        // the mark, the pills and the link add about ninety (137 when this was
+        // the mark, the pills and the link add about sixty-five (112 when this was
         // measured).
         let nodes = painted(AppRouter::Login, 390);
-        assert!(nodes >= 120, "{nodes} nodes");
+        assert!(nodes >= 100, "{nodes} nodes");
     }
 
     #[test]

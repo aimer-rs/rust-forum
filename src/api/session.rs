@@ -7,7 +7,10 @@
 //! being closed; see [`restore`].
 
 use super::BASE_URL;
+use crate::store::AppStore;
+use aimer::passkey::{GetRequest, PasskeyError, Passkeys, PlatformPasskeys, UserVerification};
 use aimer::vault::{PlatformVault, Vault};
+use aimer::{ProviderHandle, Venus};
 use reqwest::Url;
 use reqwest::cookie::{CookieStore, Jar};
 use serde::Deserialize;
@@ -131,6 +134,24 @@ pub async fn restore() -> Result<Option<String>, String> {
 pub async fn sign_out() -> Result<(), String> {
     expire_cookies(jar());
     forget_cookies().await
+}
+
+/// Ends the sign-in on this device: the app forgets who it is signed in as, and
+/// the saved cookies are dropped in the background; see [`sign_out`].
+///
+/// The tests leave the vault alone: it holds the sign-in of whoever runs them.
+pub fn end(store: &ProviderHandle<AppStore>) {
+    store.update(|store| store.sign_out());
+    if cfg!(test) {
+        return;
+    }
+    if let Some(venus) = Venus::current() {
+        // A failure to clear the vault has nowhere to go; the cookies the forum
+        // gets from the jar are already gone.
+        venus.spawn(async {
+            let _ = sign_out().await;
+        });
+    }
 }
 
 /// Expires every cookie the jar holds for the forum, as the forum itself would to
@@ -387,10 +408,177 @@ pub async fn verify_login_code(
     }
 }
 
+/// What signing in with a passkey came to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PasskeyOutcome {
+    /// The session is now the member's, under this username.
+    SignedIn(String),
+    /// The member dismissed the system's sheet: not a failure to tell them of.
+    Cancelled,
+}
+
+/// Standard base64, which is what the forum's own page sends a passkey's parts
+/// in (not the URL-safe kind the WebAuthn JSON uses).
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let group = chunk.iter().enumerate().fold(0u32, |group, (i, byte)| group | (*byte as u32) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ALPHABET[(group >> (18 - 6 * i) & 0x3F) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// The fields of the form the forum takes a passkey sign-in in: the parts of the
+/// assertion, as the forum's page names and encodes them.
+fn passkey_fields(
+    credential_id: &[u8],
+    client_data: &[u8],
+    authenticator_data: &[u8],
+    signature: &[u8],
+    user_handle: Option<&[u8]>,
+) -> Vec<(&'static str, String)> {
+    vec![
+        ("publicKeyCredential[signature]", base64(signature)),
+        ("publicKeyCredential[clientData]", base64(client_data)),
+        ("publicKeyCredential[authenticatorData]", base64(authenticator_data)),
+        ("publicKeyCredential[credentialId]", base64(credential_id)),
+        ("publicKeyCredential[userHandle]", base64(user_handle.unwrap_or_default())),
+    ]
+}
+
+/// The sentence to show for a passkey that could not be used, or `None` when the
+/// member only closed the sheet.
+fn passkey_failure(error: &PasskeyError) -> Option<String> {
+    Some(
+        match error {
+            PasskeyError::Cancelled => return None,
+            PasskeyError::NoCredential => {
+                "No passkey for the forum was found on this device. Add one in your forum preferences first."
+            }
+            PasskeyError::NotAssociated | PasskeyError::MissingEntitlement => {
+                "The forum hasn't authorised this app to use its passkeys, so this device can't sign in with one. Use a one-time code instead."
+            }
+            PasskeyError::Unavailable { .. } | PasskeyError::Unsupported => {
+                "Passkeys aren't available on this device."
+            }
+            PasskeyError::TimedOut => "Timed out waiting for the passkey. Try again.",
+            PasskeyError::Interrupted => "The passkey sign-in was interrupted. Try again.",
+            _ => "Couldn't sign in with the passkey. Try again in a moment.",
+        }
+        .to_owned(),
+    )
+}
+
+/// Signs in with a passkey the device holds for the forum.
+///
+/// The forum hands out a challenge, which it remembers in the session cookie of
+/// the client that asked, so the same client sends the answer. The device's
+/// sheet is shown for the member to choose a passkey and confirm it, and what it
+/// signs goes back to the forum. As with a code, that the member is in is
+/// decided by asking the forum who the session now belongs to.
+///
+/// The passkey belongs to the forum's domain, which the platform only lets an app
+/// use if the domain vouches for it; see [`passkey_failure`] for what the member
+/// is told when it doesn't.
+///
+/// It must run on the task queue of the UI thread: the system's sheet is driven
+/// from there.
+pub async fn sign_in_with_passkey() -> Result<PasskeyOutcome, String> {
+    let passkeys = PlatformPasskeys::new();
+    match passkeys.is_available().await {
+        Ok(true) => {}
+        _ => return Err("Passkeys aren't available on this device.".to_owned()),
+    }
+
+    let challenge: PasskeyChallenge = get_json("session/passkey/challenge.json").await?;
+    let rp_id = forum_url().host_str().unwrap_or_default().to_owned();
+    // The forum's page turns the characters of the challenge into bytes as they
+    // are, rather than decoding them.
+    let request = GetRequest::new(rp_id, challenge.challenge.into_bytes())
+        .user_verification(UserVerification::Required);
+    let assertion = match passkeys.get(request).await {
+        Ok(assertion) => assertion,
+        Err(error) => return passkey_failure(&error).map_or(Ok(PasskeyOutcome::Cancelled), Err),
+    };
+
+    let fields = passkey_fields(
+        assertion.credential_id(),
+        assertion.client_data_json(),
+        assertion.authenticator_data(),
+        assertion.signature(),
+        assertion.user_handle(),
+    );
+    let pairs: Vec<(&str, &str)> = fields.iter().map(|(name, value)| (*name, value.as_str())).collect();
+    let (status, body) = post_form("session/passkey/auth.json", &pairs).await?;
+    if body.get("error").is_some() || !(200..300).contains(&status) {
+        return Err(failure_message(status, &body));
+    }
+    match session_username().await? {
+        Some(username) => {
+            let _ = save_cookies().await;
+            Ok(PasskeyOutcome::SignedIn(username))
+        }
+        None => Err(COULD_NOT_SIGN_IN.to_owned()),
+    }
+}
+
+#[derive(Deserialize)]
+struct PasskeyChallenge {
+    challenge: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn base64_is_the_standard_padded_kind() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+        // The characters the URL-safe kind swaps out.
+        assert_eq!(base64(&[0xfb, 0xff, 0xfe]), "+//+");
+    }
+
+    #[test]
+    fn a_passkey_goes_to_the_forum_in_the_fields_its_page_uses() {
+        let fields = passkey_fields(b"id", b"client", b"auth", b"sig", None);
+        let names: Vec<_> = fields.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            names,
+            [
+                "publicKeyCredential[signature]",
+                "publicKeyCredential[clientData]",
+                "publicKeyCredential[authenticatorData]",
+                "publicKeyCredential[credentialId]",
+                "publicKeyCredential[userHandle]",
+            ]
+        );
+        assert_eq!(fields[0].1, base64(b"sig"));
+        // A passkey with no user handle sends none, as the page does.
+        assert_eq!(fields[4].1, "");
+        assert_eq!(passkey_fields(b"i", b"c", b"a", b"s", Some(b"me"))[4].1, "bWU=");
+    }
+
+    #[test]
+    fn a_closed_sheet_is_not_a_failure_but_a_domain_that_does_not_vouch_is() {
+        assert_eq!(passkey_failure(&PasskeyError::Cancelled), None);
+        let note = passkey_failure(&PasskeyError::NotAssociated).unwrap();
+        assert!(note.contains("authorised"), "{note}");
+        assert_eq!(passkey_failure(&PasskeyError::NotAssociated), passkey_failure(&PasskeyError::MissingEntitlement));
+        assert!(passkey_failure(&PasskeyError::NoCredential).unwrap().contains("No passkey"));
+        assert!(passkey_failure(&PasskeyError::Failed).is_some());
+    }
 
     #[test]
     fn the_challenge_is_answered_with_its_reverse() {

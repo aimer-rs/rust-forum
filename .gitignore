@@ -21,3 +21,4 @@ target
 Cargo.lock
 
 # add another ignore here -_-
+.DS_Store

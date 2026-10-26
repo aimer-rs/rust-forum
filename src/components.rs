@@ -12,3 +12,4 @@ pub mod side_bar;
 pub mod skeleton_topic_card;
 pub mod theme_selector;
 pub mod topic_card;
+pub mod windows;

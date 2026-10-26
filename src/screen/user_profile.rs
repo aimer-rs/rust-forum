@@ -3,6 +3,7 @@ mod tabs;
 
 use crate::api::Api;
 use crate::app_shell::{MOBILE_TOP, is_mobile};
+use crate::components::windows::Placement;
 use crate::components::side_bar::parse_hex_color;
 use crate::components::topic_card::{count_label, divider_decor, format_count, relative_time};
 use crate::html_markdown::{forum_markdown, html_to_markdown};
@@ -27,6 +28,9 @@ use aimer::{
 
 /// How long the profile takes to cross-fade in over its skeleton once it arrives.
 const CONTENT_FADE: std::time::Duration = std::time::Duration::from_millis(250);
+/// The room above the profile in a window of its own: the title bar is drawn over
+/// the top of the window, so the profile starts below its buttons.
+const WINDOW_TOP: u32 = 44;
 const AVATAR_SIZE: f32 = 96.0;
 const ICON_SIZE: u32 = 16;
 
@@ -35,11 +39,28 @@ const ICON_SIZE: u32 = 16;
 #[derive(Clone, StatelessWidget)]
 pub struct UserProfileScreen {
     username: ShareRef<str>,
+    placement: Placement,
 }
 
 impl UserProfileScreen {
     pub fn new(username: ShareRef<str>) -> Self {
-        Self { username }
+        Self { username, placement: Placement::Page }
+    }
+
+    /// Where the profile is shown, which says how much room it leaves at its top.
+    pub fn placement(mut self, placement: Placement) -> Self {
+        self.placement = placement;
+        self
+    }
+}
+
+/// The room a screen leaves above its first line: the bar over a page, with the
+/// status bar of a narrow window, or the room the title bar of a window of its own
+/// takes, with the buttons that close it.
+pub fn top(ctx: &BuildContext, placement: Placement) -> u32 {
+    match placement {
+        Placement::Page => case!(is_mobile(ctx), MOBILE_TOP) + 70,
+        Placement::Window => WINDOW_TOP,
     }
 }
 
@@ -48,6 +69,7 @@ impl StatelessWidget for UserProfileScreen {
         let theme = *ForumTheme::of(ctx);
         let store = ProviderHandle::<AppStore>::of(ctx);
         let username = self.username.clone();
+        let placement = self.placement;
         let key = username.to_string();
         // A profile seen before is already in the store. `AsyncBuilder` always
         // starts in `Waiting`, so without this it would flash its skeleton for a
@@ -95,12 +117,10 @@ impl StatelessWidget for UserProfileScreen {
 
         Container::new().color(theme.background_color()).child(
             Stack::new().children([Scrollable::new()
-                .key(format!("scrollable-profile-{key}"))
+                .key(self.placement.key("scrollable-profile") + &format!("-{key}"))
                 .box_child(
                     Column::new().children([
-                        SizedBox::new()
-                            .height(case!(is_mobile(ctx), MOBILE_TOP) + 70)
-                            .boxed(),
+                        SizedBox::new().height(top(ctx, placement)).boxed(),
                         data.boxed(),
                         SizedBox::new().height(90).boxed(),
                     ]),

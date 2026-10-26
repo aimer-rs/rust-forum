@@ -27,6 +27,8 @@ const SWITCH_KNOB: f32 = 24.0;
 /// The room under the last group: the tab bar floats over it on the pages that
 /// have one.
 const BOTTOM_MARGIN: f32 = 130.0;
+/// The room under the last group where no bar floats over it.
+const WIDE_BOTTOM_MARGIN: f32 = 24.0;
 
 /// A page of the settings: the title under the bar over the page, and the groups
 /// under it, scrolling.
@@ -44,7 +46,11 @@ pub fn page(
         SizedBox::new().height(8).boxed(),
     ];
     content.extend(body);
-    content.push(SizedBox::new().height(BOTTOM_MARGIN).boxed());
+    content.push(
+        SizedBox::new()
+            .height(if is_mobile(ctx) { BOTTOM_MARGIN } else { WIDE_BOTTOM_MARGIN })
+            .boxed(),
+    );
 
     Container::new()
         .color(theme.background_color())

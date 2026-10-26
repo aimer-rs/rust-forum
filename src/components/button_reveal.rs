@@ -20,8 +20,10 @@ const BLUR_FLOOR: f32 = 0.5;
 /// aimer can blur what is behind a widget but not the widget itself, so it is the
 /// backdrop under the button that blurs, not the button.
 ///
-/// The button is built afresh on every frame of the motion, so it is given as a
-/// function; its own state, like a press, survives that.
+/// The button is built once and kept, and only the motion around it is rebuilt on
+/// each frame, so the cost of a frame does not grow with the button. It is still
+/// given as a function: the function runs when this widget is built, so a new
+/// button, such as a tab bar with another tab selected, replaces the old one.
 #[derive(Clone, StatelessWidget)]
 pub struct ButtonReveal {
     controller: AnimationController,
@@ -84,25 +86,28 @@ fn revealed(progress: f32, scale_from: f32, radius: f32, slot: SizedBox, content
 impl StatelessWidget for ButtonReveal {
     fn build(&self, _ctx: &BuildContext) -> impl Widget {
         let (width, height, radius, scale_from) = (self.width, self.height, self.radius, self.scale_from);
-        let button = self.button.clone();
 
         // The slot keeps the button's own size, so the row around it does not move
         // while the button, drawn larger, does.
         SizedBox::new()
             .width(width)
             .height(height)
-            .child(AnimatedBuilder::new(self.controller.clone(), move |progress| {
-                revealed(progress, scale_from, radius, SizedBox::new().width(width).height(height), button())
-            }))
+            .child(AnimatedBuilder::with_child(
+                self.controller.clone(),
+                (self.button)(),
+                move |progress, button| {
+                    revealed(progress, scale_from, radius, SizedBox::new().width(width).height(height), button.boxed())
+                },
+            ))
     }
 }
 
 /// [`ButtonReveal`] for a field that takes the width it is given: the same
 /// motion, with the backdrop as wide as the field is.
 ///
-/// Like the button, the field is given as a function, as it is built afresh on
-/// every frame of the motion; the state of what it builds, such as the text typed
-/// and the focus, survives that.
+/// Like the button, the field is given as a function that runs when this widget
+/// is built; what it builds is kept for the whole motion, so the text typed and
+/// the focus are never disturbed by it.
 #[derive(Clone, StatelessWidget)]
 pub struct FieldReveal {
     controller: AnimationController,
@@ -141,15 +146,14 @@ impl FieldReveal {
 impl StatelessWidget for FieldReveal {
     fn build(&self, _ctx: &BuildContext) -> impl Widget {
         let (height, radius, scale_from) = (self.height, self.radius, self.scale_from);
-        let field = self.field.clone();
 
-        AnimatedBuilder::new(self.controller.clone(), move |progress| {
+        AnimatedBuilder::with_child(self.controller.clone(), (self.field)(), move |progress, field| {
             revealed(
                 progress,
                 scale_from,
                 radius,
                 SizedBox::new().width(Dimension::Percent(100.0)).height(height),
-                field(),
+                field.boxed(),
             )
         })
     }

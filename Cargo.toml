@@ -1,5 +1,5 @@
 [package]
-name = "RustForum"
+name = "rust_forum"
 version = "0.1.0"
 edition = "2024"
 
@@ -9,21 +9,24 @@ crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 
-# aimer = { git = "https://github.com/Cottons29/aimer", branch = "main", features = [
-#     "provider",
-#     "markdown",
-#     "markdown-syntect",
-#     "svg",
-#     "icons",
-# ] }
-aimer = { path = "../aimer", features = [
+aimer = { git = "https://github.com/Cottons29/aimer", branch = "main", features = [
     "provider",
     "markdown",
     "markdown-syntect",
     "svg",
     "icons",
     "vault",
+    "passkey",
 ] }
+# aimer = { path = "../aimer", features = [
+#     "provider",
+#     "markdown",
+#     "markdown-syntect",
+#     "svg",
+#     "icons",
+#     "vault",
+#     "passkey",
+# ] }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = "1.0.151"
 reqwest = { version = "0.13.4", default-features = false, features = [

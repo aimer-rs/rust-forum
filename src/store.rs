@@ -11,6 +11,25 @@ use aimer::style::ThemeMode;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+/// What the dialog window is first showing when it opens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DialogPage {
+    Settings,
+    Login,
+}
+
+/// Which of the app's own windows are open, on a desktop. They are windows of the
+/// operating system rather than parts of the app's window; see
+/// [`crate::components::windows`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Windows {
+    /// The one window the settings and the sign-in share, and the page it opened
+    /// on; `None` while it is shut.
+    pub dialog: Option<DialogPage>,
+    /// The window with the signed-in member's own profile.
+    pub profile: bool,
+}
+
 #[derive(Clone, Default)]
 pub struct AppStore {
     pub root: Root,
@@ -32,6 +51,8 @@ pub struct AppStore {
     pub theme_mode: ThemeMode,
     /// The tabs of the bar of a narrow window.
     pub navbar: NavbarTabs,
+    /// The windows open beside the app's own; see [`Windows`].
+    pub windows: Windows,
     /// What the search bar holds. The bar lives in the shell and the results in
     /// the page, so the store is where they meet.
     /// The signed-in user's username. Nobody can sign in yet, so it is `None`.
@@ -85,6 +106,10 @@ impl AppStore {
             return;
         }
         self.current_user = Some(username);
+        // A window opened to sign in from has done its work.
+        if self.windows.dialog == Some(DialogPage::Login) {
+            self.windows.dialog = None;
+        }
         self.streams.clear();
         self.session_epoch += 1;
     }
@@ -93,6 +118,8 @@ impl AppStore {
     /// forum answers a guest differently, see [`AppStore::sign_in`].
     pub fn sign_out(&mut self) {
         if self.current_user.take().is_some() {
+            // Whose profile it showed is gone.
+            self.windows.profile = false;
             self.streams.clear();
             self.session_epoch += 1;
         }

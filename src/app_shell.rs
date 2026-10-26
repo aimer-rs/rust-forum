@@ -4,6 +4,7 @@ use std::time::Duration;
 use crate::api::session;
 use crate::preferences;
 use crate::components::post_action_bar::{ActionBar, SearchControls};
+use crate::components::windows::WindowsLayer;
 use crate::components::side_bar::{AppSideBar, MOBILE_BREAKPOINT, MobileNavbar};
 use crate::router::AppRouter;
 use crate::store::AppStore;
@@ -101,13 +102,24 @@ impl StatelessWidget for ShellFrame {
                 content.push(NavbarSlot::new(route).boxed());
                 Stack::new().children(content).boxed()
             } else {
-                Row::new()
+                let window = Row::new()
                     .justify_content(JustifyContent::SpaceBetween)
                     .children([
                         AppSideBar::new().boxed(),
                         Expanded::new()
                             .flex(0.95)
                             .box_child(Stack::new().children(content)),
+                    ]);
+                // Settings, the sign-in and the profile open in windows of their own.
+                Stack::new()
+                    .children([
+                        SizedBox::new()
+                            .width(Percent(100.0))
+                            .height(Percent(100.0))
+                            .box_child(window),
+                        // Takes no room: it declares those windows, which are open
+                        // while the store says so.
+                        WindowsLayer.boxed(),
                     ])
                     .boxed()
             })
@@ -551,6 +563,13 @@ pub const MOBILE_TOP: u32 = 52;
 
 pub fn is_mobile(ctx: &BuildContext) -> bool {
     MediaQuery::select(ctx, |media| media.size.width < MOBILE_BREAKPOINT)
+}
+
+/// Whether signing in and the member's profile open in windows of their own: on a
+/// computer, in a window wide enough to have the sidebar. Everywhere else, a phone
+/// or a narrow window, they are pages of the app, as a phone has one surface.
+pub fn has_windows(ctx: &BuildContext) -> bool {
+    cfg!(not(any(target_os = "ios", target_os = "android"))) && !is_mobile(ctx)
 }
 
 #[cfg(test)]

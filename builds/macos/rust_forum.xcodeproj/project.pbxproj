@@ -15,8 +15,9 @@
 /* Begin PBXFileReference section */
 		869B3A9A25A7761000BD7BA8 /* main.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		020104604E249606F8C9CAED /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
-		D748B9601A3AA05BDAF53561 /* RustForum.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RustForum.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D748B9601A3AA05BDAF53561 /* rust_forum.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = rust_forum.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E2F3A4B5C6D7E8091A2B3C4D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C0FFEE1234567890ABCDEF01 /* RustLinkFlags.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = RustLinkFlags.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -34,19 +35,20 @@
 		42D9F67E0760F412DF98166F = {
 			isa = PBXGroup;
 			children = (
-				BCE298E721FCDDD500AEEAC0 /* RustForum */,
+				C0FFEE1234567890ABCDEF01 /* RustLinkFlags.xcconfig */,
+				BCE298E721FCDDD500AEEAC0 /* rust_forum */,
 				A0CAA35B87EA7D492A519F06 /* Products */,
 				474E090F57E886570692359B /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
-		BCE298E721FCDDD500AEEAC0 /* RustForum */ = {
+		BCE298E721FCDDD500AEEAC0 /* rust_forum */ = {
 			isa = PBXGroup;
 			children = (
 				869B3A9A25A7761000BD7BA8 /* main.swift */,
 				E2F3A4B5C6D7E8091A2B3C4D /* Assets.xcassets */,
 			);
-			path = RustForum;
+			path = rust_forum;
 			sourceTree = "<group>";
 		};
 		474E090F57E886570692359B /* Frameworks */ = {
@@ -60,7 +62,7 @@
 		A0CAA35B87EA7D492A519F06 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				D748B9601A3AA05BDAF53561 /* RustForum.app */,
+				D748B9601A3AA05BDAF53561 /* rust_forum.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -76,9 +78,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		22F13CAB095D78726C4DB483 /* RustForum */ = {
+		22F13CAB095D78726C4DB483 /* rust_forum */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 63E4EFB6F6DC0ED65FDE05C5 /* Build configuration list for PBXNativeTarget "RustForum" */;
+			buildConfigurationList = 63E4EFB6F6DC0ED65FDE05C5 /* Build configuration list for PBXNativeTarget "rust_forum" */;
 			buildPhases = (
 				51D43A7EE3F0C76EAFF2075D /* Sources */,
 				85BC754BA4B95E29C9C93860 /* Frameworks */,
@@ -88,9 +90,9 @@
 			);
 			dependencies = (
 			);
-			name = RustForum;
-			productName = RustForum;
-			productReference = D748B9601A3AA05BDAF53561 /* RustForum.app */;
+			name = rust_forum;
+			productName = rust_forum;
+			productReference = D748B9601A3AA05BDAF53561 /* rust_forum.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -102,7 +104,7 @@
 				LastSwiftUpdateCheck = 1600;
 				LastUpgradeCheck = 1600;
 			};
-			buildConfigurationList = DCC6858F12A7F676B7EA90D9 /* Build configuration list for PBXProject "RustForum" */;
+			buildConfigurationList = DCC6858F12A7F676B7EA90D9 /* Build configuration list for PBXProject "rust_forum" */;
 			compatibilityVersion = "Xcode 3.2";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -117,7 +119,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				22F13CAB095D78726C4DB483 /* RustForum */,
+				22F13CAB095D78726C4DB483 /* rust_forum */,
 			);
 		};
 /* End PBXProject section */
@@ -262,15 +264,16 @@
 		};
 		B2672DDDCE86BB2B16CB875F /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = C0FFEE1234567890ABCDEF01 /* RustLinkFlags.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "RustForum/Info.plist";
+				INFOPLIST_FILE = "rust_forum/Info.plist";
 				COMBINE_HIDPI_IMAGES = YES;
 				OTHER_LDFLAGS = (
 					"-L$(SRCROOT)/Libraries",
-					"-lRustForum",
+					"-lrust_forum",
 					"-lc++",
 					"-framework",
 					AppKit,
@@ -290,6 +293,7 @@
 					QuartzCore,
 					"-framework",
 					Security,
+					"$(AIMER_RUST_LDFLAGS)",
 				);
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				SDKROOT = macosx;
@@ -298,15 +302,16 @@
 		};
 		E17238934DC9A44C7CE6482E /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = C0FFEE1234567890ABCDEF01 /* RustLinkFlags.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "RustForum/Info.plist";
+				INFOPLIST_FILE = "rust_forum/Info.plist";
 				COMBINE_HIDPI_IMAGES = YES;
 				OTHER_LDFLAGS = (
 					"-L$(SRCROOT)/Libraries",
-					"-lRustForum",
+					"-lrust_forum",
 					"-lc++",
 					"-framework",
 					AppKit,
@@ -326,6 +331,7 @@
 					QuartzCore,
 					"-framework",
 					Security,
+					"$(AIMER_RUST_LDFLAGS)",
 				);
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				SDKROOT = macosx;
@@ -335,7 +341,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		63E4EFB6F6DC0ED65FDE05C5 /* Build configuration list for PBXNativeTarget "RustForum" */ = {
+		63E4EFB6F6DC0ED65FDE05C5 /* Build configuration list for PBXNativeTarget "rust_forum" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				E17238934DC9A44C7CE6482E /* Release */,
@@ -344,7 +350,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		DCC6858F12A7F676B7EA90D9 /* Build configuration list for PBXProject "RustForum" */ = {
+		DCC6858F12A7F676B7EA90D9 /* Build configuration list for PBXProject "rust_forum" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				7E4C0C46B6A41907AC9B8C5A /* Debug */,

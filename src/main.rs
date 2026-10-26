@@ -14,7 +14,6 @@ mod topic_stream;
 
 use crate::router::AppRouter;
 use crate::store::AppStore;
-use aimer::native::macos_windowing::MacosWindowing;
 use aimer::quiver::window_attr::WindowAttr;
 use aimer::router::Navigator;
 use aimer::*;
@@ -25,6 +24,9 @@ fn main() {
     // String::type_id(;)
 
     AimerApp::new()
+        // The settings, the sign-in and the profile open windows of their own:
+        // closing the forum's window ends the app, and takes them with it.
+        .exit_policy(ExitPolicy::MainWindowClosed)
         .window(
             WindowAttr::new()
                 .title("Rust Forum")
@@ -32,14 +34,8 @@ fn main() {
                .min_inner_size(900, 620),
         )
         .setup(|| {
-            MacosWindowing::new()
-                .titlebar_transparent(true)
-                .title_hidden(true)
-                .fullsize_content_view(true)
-                .traffic_light_position(16.0, 14.0)
-                .has_shadow(true)
-                .accepts_first_mouse(true)
-                .install();
+            // The windows the app opens later look the same: see `chrome`.
+            components::windows::chrome().install();
         })
         .child(
             // take this

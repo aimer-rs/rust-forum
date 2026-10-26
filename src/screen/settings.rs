@@ -1,11 +1,12 @@
 mod appearance;
-mod widgets;
+pub(crate) mod widgets;
 
 pub use appearance::AppearanceScreen;
 
 use crate::api::session;
-use crate::app_shell::is_mobile;
+use crate::app_shell::{has_windows, is_mobile};
 use crate::components::avatar::round_avatar;
+use crate::components::windows;
 use crate::router::AppRouter;
 use crate::screen::settings::widgets::{
     SettingsRow, Tile, Trailing, footnote, group, heading, page,
@@ -16,7 +17,7 @@ use aimer::router::NavigatorController;
 use aimer::style::{Theme, ThemeMode};
 use aimer::{
     AnyWidget, BuildContext, Icons, ProviderContext, ProviderHandle, State, StateUpdater,
-    StatefulWidget, Venus, Widget,
+    StatefulWidget, Widget,
 };
 
 /// The settings: what can be changed, in groups. Each group is a heading over a
@@ -56,19 +57,7 @@ impl SettingsState {
             return;
         }
         self.confirming_sign_out = false;
-        store.update(|store| store.sign_out());
-        // The tests leave the vault alone: it holds the sign-in of whoever runs them.
-        if cfg!(test) {
-            return;
-        }
-        if let Some(venus) = Venus::current() {
-            // Ending the session on this device: the jar and the vault. A failure
-            // to clear the vault has nowhere to go; the cookies the forum gets
-            // from the jar are already gone.
-            venus.spawn(async {
-                let _ = session::sign_out().await;
-            });
-        }
+        session::end(store);
     }
 }
 
@@ -95,6 +84,9 @@ impl State<SettingsScreen> for SettingsState {
         let mode = ctx.select::<AppStore, ThemeMode>(|s| s.theme_mode);
         let tab_count = ctx.select::<AppStore, usize>(|s| s.navbar.len());
 
+        // On a computer the account opens in a window of its own; the sign-in is
+        // the next page of the window the settings are in.
+        let windowed = has_windows(ctx);
         let open_appearance = {
             let navigator = navigator.clone();
             move || navigator.push(AppRouter::SettingsAppearance)
@@ -120,13 +112,20 @@ impl State<SettingsScreen> for SettingsState {
         let account = match &user {
             Some(name) => {
                 let navigator = navigator.clone();
+                let store = store.clone();
                 let avatar = name.clone();
                 SettingsRow::new(
                     Tile::Custom(Box::new(move |_| round_avatar(theme, "", &avatar, 24.0))),
                     name.clone(),
                 )
                     .trailing(Trailing::Chevron)
-                    .on_press(move || navigator.set_route(AppRouter::Account))
+                    .on_press(move || {
+                        if windowed {
+                            windows::open_profile(&store);
+                        } else {
+                            navigator.set_route(AppRouter::Account);
+                        }
+                    })
                     .build(theme)
             }
             None => {

@@ -1,16 +1,18 @@
-use crate::app_shell::{MOBILE_TOP, is_mobile};
 use crate::components::auth_button::filled_button;
 use crate::components::avatar::round_avatar;
+use crate::app_shell::has_windows;
+use crate::components::windows::Placement;
+use crate::components::windows;
 use crate::router::AppRouter;
-use crate::screen::user_profile::{UserProfileScreen, card_count};
+use crate::screen::user_profile::{UserProfileScreen, card_count, top};
 use crate::store::AppStore;
 use crate::theme::ForumTheme;
 use aimer::router::NavigatorController;
 use aimer::share::ShareRef;
 use aimer::style::{LayoutSpacing, TextOverflow, TextStyle, Theme};
 use aimer::{
-    BoxAlignment, BuildContext, Column, Container, Expanded, FontWeight, ProviderContext, Row,
-    Scrollable, SizedBox, StatelessWidget, Text, Widget, case,
+    BoxAlignment, BuildContext, Column, Container, Expanded, FontWeight, ProviderContext, ProviderHandle, Row,
+    Scrollable, SizedBox, StatelessWidget, Text, Widget,
 };
 
 const AVATAR_SIZE: f32 = 96.0;
@@ -21,7 +23,19 @@ const AVATAR_SIZE: f32 = 96.0;
 /// with nothing counted and an invitation to sign in; once there is a signed-in
 /// user it is their profile page, the same as any other member's.
 #[derive(Clone, StatelessWidget)]
-pub struct AccountScreen;
+pub struct AccountScreen {
+    placement: Placement,
+}
+
+impl AccountScreen {
+    pub fn new(placement: Placement) -> Self {
+        Self { placement }
+    }
+
+    pub fn page() -> Self {
+        Self::new(Placement::Page)
+    }
+}
 
 impl StatelessWidget for AccountScreen {
     fn build(&self, ctx: &BuildContext) -> impl Widget {
@@ -29,16 +43,21 @@ impl StatelessWidget for AccountScreen {
         let user = ctx.select::<AppStore, Option<String>>(|s| s.current_user.clone());
 
         if let Some(username) = user {
-            return UserProfileScreen::new(ShareRef::from_str_slice(&username)).boxed();
+            return UserProfileScreen::new(ShareRef::from_str_slice(&username)).placement(self.placement).boxed();
         }
 
         Container::new()
             .color(theme.background_color())
-            .child(Scrollable::new().key("scrollable-account").box_child(Column::new().children([
-                SizedBox::new().height(case!(is_mobile(ctx), MOBILE_TOP) + 70).boxed(),
+            .child(Scrollable::new().key(self.placement.key("scrollable-account")).box_child(Column::new().children([
+                SizedBox::new().height(top(ctx, self.placement)).boxed(),
                 Container::new()
                     .padding(LayoutSpacing::horizontal(24.into()))
-                    .child(signed_out(theme, NavigatorController::<AppRouter>::of(ctx)))
+                    .child(signed_out(
+                        theme,
+                        NavigatorController::<AppRouter>::of(ctx),
+                        ProviderHandle::<AppStore>::of(ctx),
+                        has_windows(ctx),
+                    ))
                     .boxed(),
                 SizedBox::new().height(90).boxed(),
             ])))
@@ -48,7 +67,12 @@ impl StatelessWidget for AccountScreen {
 
 /// The profile of nobody: the card of a profile with its figures at nothing,
 /// and what to do about it.
-fn signed_out(theme: ForumTheme, navigator: NavigatorController<AppRouter>) -> impl Widget {
+fn signed_out(
+    theme: ForumTheme,
+    navigator: NavigatorController<AppRouter>,
+    store: ProviderHandle<AppStore>,
+    windowed: bool,
+) -> impl Widget {
     let muted = theme.on_background_color().with_opacity(160);
 
     let card = Row::new()
@@ -98,7 +122,13 @@ fn signed_out(theme: ForumTheme, navigator: NavigatorController<AppRouter>) -> i
                 .boxed(),
             ])
             .boxed(),
-        filled_button(theme, "Sign in", move || navigator.push(AppRouter::Login)),
+        filled_button(theme, "Sign in", move || {
+            if windowed {
+                windows::open_login(&store);
+            } else {
+                navigator.push(AppRouter::Login);
+            }
+        }),
     ])
 }
 
