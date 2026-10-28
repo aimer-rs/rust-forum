@@ -1,0 +1,9 @@
+ms        0        100       200       300       400       500
+progress  0.0      0.2       0.4       0.6       0.8       1.0
+          |---------|---------|---------|---------|---------|
+LIFT      ██████████████████                                    0–167   card copy 1.00→1.06 (EASE_OUT)
+TURN                        ██████████████████████                  167–333 copy fades out, post fades in
+BLUR                           ░░▒▒▓▓██████████▓▓▒▒░░       peak 10px at 250ms, 0 at 167 and 333
+GROW                                              ██████████████ 333–500 window card→screen (FAST_OUT_SLOW_IN)
+CORNERS   12px ───────────────────────────────────────────→ 0px   shrinks only during GROW
+DIM       0 ────────────────────────────────────────────→ 0.25   whole 500ms, linear
