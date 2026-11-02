@@ -1,6 +1,6 @@
-mod comments;
+pub(crate) mod comments;
 
-use crate::app_shell::{MOBILE_TOP, is_mobile};
+use crate::app_shell::{beside_buttons, content_top};
 use crate::api::Api;
 use crate::html_markdown::{forum_markdown, html_to_markdown};
 use crate::models::posts::PostRoot;
@@ -8,13 +8,14 @@ use crate::screen::post_detail::comments::CommentsSection;
 use crate::store::AppStore;
 use crate::theme::ForumTheme;
 use aimer::animation::{AnimatedBuilder, AnimatedSwitcher, AnimationController, FadeTransition, curves};
-use aimer::console::error;
+use aimer::console::{debug, error};
+use aimer::screen::MediaQuery;
 use aimer::share::ShareRef;
 use aimer::style::{BoxDecoration, LayoutSpacing, TextOverflow, TextStyle, Theme};
 use aimer::{
     AnyWidget, AsyncBuilder, AsyncSnapshot, BuildContext, Color, Column, Container, Dimension, FontWeight, ProviderHandle, ScrollController,
     Scrollable, SizedBox, Stack, State, StateUpdater, StatefulWidget, StatelessWidget, Text,
-    Widget, ZeroSizedBox, case,
+    Vec2d, Widget, ZeroSizedBox, case,
 };
 use std::rc::Rc;
 use std::time::Duration;
@@ -54,6 +55,10 @@ impl PostDetailScreen {
 pub struct PostDetailScreenState {
     parent: PostDetailScreen,
     scroll_controller: ScrollController,
+    /// A second handle on `scroll_controller` for its own scroll callback to
+    /// reach through a `Weak`: the controller keeps that callback alive, so a
+    /// callback holding the controller itself would keep both alive forever.
+    scroll_probe: Rc<ScrollController>,
     /// Holds the whole page transparent for its first frames; see [`REVEAL`].
     reveal: AnimationController,
     is_scrolling: bool,
@@ -63,9 +68,11 @@ impl StatefulWidget for PostDetailScreen {
     type State = PostDetailScreenState;
 
     fn create_state(self) -> Self::State {
+        let scroll_controller = ScrollController::new();
         PostDetailScreenState {
             parent: self,
-            scroll_controller: ScrollController::new(),
+            scroll_probe: Rc::new(scroll_controller.clone()),
+            scroll_controller,
             reveal: {
                 let reveal = AnimationController::new(REVEAL, curves::EASE_IN);
                 reveal.forward_from_first_tick();
@@ -97,6 +104,8 @@ impl State<PostDetailScreen> for PostDetailScreenState {
     }
 
     fn build(&self, ctx: &BuildContext) -> impl Widget {
+        let fold_state = MediaQuery::hinge_of(ctx);
+        debug!("Fold State: {:?}", fold_state);
         let theme = *ForumTheme::of(ctx);
         let store = ProviderHandle::<AppStore>::of(ctx);
         // let navigator = NavigatorController::<AppRouter>::of(ctx);
@@ -110,6 +119,18 @@ impl State<PostDetailScreen> for PostDetailScreenState {
         // skeleton for a frame before the (instant) fetch delivers it.
         let cached = store.read().cached_post(id);
         let scroll_ctrler = self.scroll_controller.clone();
+
+        // The comments past the first batch are fetched as the reader nears the
+        // end of the page rather than all at once: every chunk that lands
+        // rebuilds the whole comment list, so the cost grows with how many are
+        // loaded. Registered on every build so it always carries the current id.
+        let paging_store = store.clone();
+        let paging_scroll = Rc::downgrade(&self.scroll_probe);
+        self.scroll_controller.on_scroll(move |offset: Vec2d| {
+            if let Some(scroll) = paging_scroll.upgrade() {
+                comments::load_more_if_near_end(&paging_store, id, offset.y, scroll.max_extent().y);
+            }
+        });
 
         let data = AsyncBuilder::new()
             .request_key(id)
@@ -154,11 +175,14 @@ impl State<PostDetailScreen> for PostDetailScreenState {
             Stack::new().children([
                 Scrollable::new()
                     .controller(scroll_ctrler)
-                    .box_child(Column::new().children([
-                        SizedBox::new().height(case!(is_mobile(ctx), MOBILE_TOP) + 86).boxed(),
-                        data.boxed(),
-                        SizedBox::new().height(90).boxed(),
-                    ])),
+                    .box_child(beside_buttons(
+                        ctx,
+                        Column::new().children([
+                            SizedBox::new().height(content_top(ctx) + 86).boxed(),
+                            data.boxed(),
+                            SizedBox::new().height(90).boxed(),
+                        ]),
+                    )),
             ]),
         ))
     }

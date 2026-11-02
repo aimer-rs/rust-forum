@@ -7,17 +7,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		869B3A9B25A7761000BD7BA8 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 869B3A9A25A7761000BD7BA8 /* main.swift */; };
 		093271CEB774B51CA3277672 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 020104604E249606F8C9CAED /* Cocoa.framework */; };
+		869B3A9B25A7761000BD7BA8 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 869B3A9A25A7761000BD7BA8 /* main.swift */; };
 		F1A2B3C4D5E6F7081920A1B2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E2F3A4B5C6D7E8091A2B3C4D /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		869B3A9A25A7761000BD7BA8 /* main.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		020104604E249606F8C9CAED /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
+		869B3A9A25A7761000BD7BA8 /* main.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		C0FFEE1234567890ABCDEF01 /* RustLinkFlags.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = RustLinkFlags.xcconfig; sourceTree = "<group>"; };
 		D748B9601A3AA05BDAF53561 /* rust_forum.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = rust_forum.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E2F3A4B5C6D7E8091A2B3C4D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		C0FFEE1234567890ABCDEF01 /* RustLinkFlags.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = RustLinkFlags.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -42,15 +42,6 @@
 			);
 			sourceTree = "<group>";
 		};
-		BCE298E721FCDDD500AEEAC0 /* rust_forum */ = {
-			isa = PBXGroup;
-			children = (
-				869B3A9A25A7761000BD7BA8 /* main.swift */,
-				E2F3A4B5C6D7E8091A2B3C4D /* Assets.xcassets */,
-			);
-			path = rust_forum;
-			sourceTree = "<group>";
-		};
 		474E090F57E886570692359B /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -65,6 +56,15 @@
 				D748B9601A3AA05BDAF53561 /* rust_forum.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		BCE298E721FCDDD500AEEAC0 /* rust_forum */ = {
+			isa = PBXGroup;
+			children = (
+				869B3A9A25A7761000BD7BA8 /* main.swift */,
+				E2F3A4B5C6D7E8091A2B3C4D /* Assets.xcassets */,
+			);
+			path = rust_forum;
 			sourceTree = "<group>";
 		};
 		CADE8135B13669AF092F471E /* OS X */ = {
@@ -103,6 +103,12 @@
 			attributes = {
 				LastSwiftUpdateCheck = 1600;
 				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					22F13CAB095D78726C4DB483 = {
+						DevelopmentTeam = YCLCW25V8V;
+						ProvisioningStyle = Automatic;
+					};
+				};
 			};
 			buildConfigurationList = DCC6858F12A7F676B7EA90D9 /* Build configuration list for PBXProject "rust_forum" */;
 			compatibilityVersion = "Xcode 3.2";
@@ -113,8 +119,6 @@
 				Base,
 			);
 			mainGroup = 42D9F67E0760F412DF98166F;
-			minimizedProjectReferenceProxies = 0;
-			preferredProjectObjectVersion = 77;
 			productRefGroup = A0CAA35B87EA7D492A519F06 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -195,8 +199,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_OPTIMIZATION_LEVEL = "-Owholemodule";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
@@ -268,9 +271,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "rust_forum/Info.plist";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = YCLCW25V8V;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = rust_forum/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				OTHER_LDFLAGS = (
 					"-L$(SRCROOT)/Libraries",
 					"-lrust_forum",
@@ -295,7 +302,7 @@
 					Security,
 					"$(AIMER_RUST_LDFLAGS)",
 				);
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 			};
 			name = Debug;
@@ -306,9 +313,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "rust_forum/Info.plist";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = YCLCW25V8V;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = rust_forum/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				OTHER_LDFLAGS = (
 					"-L$(SRCROOT)/Libraries",
 					"-lrust_forum",
@@ -333,7 +344,7 @@
 					Security,
 					"$(AIMER_RUST_LDFLAGS)",
 				);
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 			};
 			name = Release;

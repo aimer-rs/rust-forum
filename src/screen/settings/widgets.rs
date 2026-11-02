@@ -1,7 +1,7 @@
 //! The pieces the settings pages are made of: a page with a title, headings that
 //! start a group, and the rows a group holds.
 
-use crate::app_shell::{MOBILE_TOP, is_mobile};
+use crate::app_shell::{beside_buttons, content_top, is_mobile};
 use crate::components::page_title::PageTitle;
 use crate::theme::ForumTheme;
 use aimer::input::button::Button;
@@ -41,7 +41,7 @@ pub fn page(
 ) -> AnyWidget {
     let mut content: Vec<AnyWidget> = vec![
         // Clear of the bar over the page, with its back button.
-        SizedBox::new().height(case!(is_mobile(ctx), MOBILE_TOP) + 56).boxed(),
+        SizedBox::new().height(content_top(ctx) + 56).boxed(),
         inset(PageTitle::new(ShareRef::from_static(title)).padding(LayoutSpacing::new()).boxed()),
         SizedBox::new().height(8).boxed(),
     ];
@@ -55,11 +55,12 @@ pub fn page(
     Container::new()
         .color(theme.background_color())
         .child(
-            Scrollable::new().key(key).box_child(
+            Scrollable::new().key(key).box_child(beside_buttons(
+                ctx,
                 Container::new()
                     .padding(LayoutSpacing::horizontal((PAGE_MARGIN as u32).into()))
                     .child(Column::new().children(content)),
-            ),
+            )),
         )
         .boxed()
 }

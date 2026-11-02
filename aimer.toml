@@ -7,8 +7,6 @@ group = "dev.aimers.rustforum"
 
 
 [assets]
-files = [
-    "assets/app-apps-applications-tiles-svgrepo-com(1).svg",
-    "assets/clock-two-thirty-svgrepo-com.svg",
-    "assets/hot-svgrepo-com.svg"
-]
+app_tile = "assets/app-apps-applications-tiles-svgrepo-com(1).svg"
+clock_icon = "assets/clock-two-thirty-svgrepo-com.svg"
+hot_icon = "assets/hot-svgrepo-com.svg"

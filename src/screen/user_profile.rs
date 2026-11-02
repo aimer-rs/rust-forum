@@ -2,7 +2,7 @@ mod skeleton;
 mod tabs;
 
 use crate::api::Api;
-use crate::app_shell::{MOBILE_TOP, is_mobile};
+use crate::app_shell::{beside_buttons, content_top};
 use crate::components::windows::Placement;
 use crate::components::side_bar::parse_hex_color;
 use crate::components::topic_card::{count_label, divider_decor, format_count, relative_time};
@@ -59,7 +59,7 @@ impl UserProfileScreen {
 /// takes, with the buttons that close it.
 pub fn top(ctx: &BuildContext, placement: Placement) -> u32 {
     match placement {
-        Placement::Page => case!(is_mobile(ctx), MOBILE_TOP) + 70,
+        Placement::Page => content_top(ctx) + 70,
         Placement::Window => WINDOW_TOP,
     }
 }
@@ -118,13 +118,14 @@ impl StatelessWidget for UserProfileScreen {
         Container::new().color(theme.background_color()).child(
             Stack::new().children([Scrollable::new()
                 .key(self.placement.key("scrollable-profile") + &format!("-{key}"))
-                .box_child(
+                .box_child(beside_buttons(
+                    ctx,
                     Column::new().children([
                         SizedBox::new().height(top(ctx, placement)).boxed(),
                         data.boxed(),
                         SizedBox::new().height(90).boxed(),
                     ]),
-                )]),
+                ))]),
         )
     }
 }

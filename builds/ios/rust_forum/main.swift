@@ -88,6 +88,16 @@ public func aimer_ios_sync_text_state(
 @_silgen_name("aimer_ios_frame_tick")
 func aimer_ios_frame_tick()
 
+// Diagnostics for frame pacing, recorded only when AIMER_FRAME_TRACE is set in
+// the app's environment (see aimer_utils::frame_trace). Safe to remove.
+@_silgen_name("aimer_ios_frame_trace_tick")
+func aimer_ios_frame_trace_tick(_ timestamp: Double, _ target: Double)
+
+@_silgen_name("aimer_ios_frame_trace_mark")
+func aimer_ios_frame_trace_mark(_ kind: UInt32)
+
+private let frameTraceEnabled = ProcessInfo.processInfo.environment["AIMER_FRAME_TRACE"] != nil
+
 final class FrameDriver {
     static let shared = FrameDriver()
     private var displayLink: CADisplayLink?
@@ -106,15 +116,20 @@ final class FrameDriver {
     }
 
     func requestFrame() {
+        if frameTraceEnabled && displayLink?.isPaused == true { aimer_ios_frame_trace_mark(1) }
         displayLink?.isPaused = false
     }
 
     func pause() {
         guard !HardwareInputForwarder.shared.hasScrollMomentum else { return }
+        if frameTraceEnabled { aimer_ios_frame_trace_mark(2) }
         displayLink?.isPaused = true
     }
 
     @objc private func tick() {
+        if frameTraceEnabled, let link = displayLink {
+            aimer_ios_frame_trace_tick(link.timestamp, link.targetTimestamp)
+        }
         HardwareInputForwarder.shared.advanceScrollMomentum(at: displayLink?.timestamp ?? CACurrentMediaTime())
         aimer_ios_frame_tick()
     }

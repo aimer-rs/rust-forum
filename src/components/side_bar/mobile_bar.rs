@@ -1,7 +1,9 @@
 use crate::components::button_reveal::ButtonReveal;
+use crate::components::post_action_bar::column_clear;
 use crate::components::side_bar::SIDE_BAR_ICONS;
 use crate::components::side_bar::glass::GlassDecoration;
 use crate::components::side_bar::user_menu::sized_avatar;
+use crate::layout::RailPlace;
 use crate::preferences::{NavTab, NavbarTabs};
 use crate::router::AppRouter;
 use crate::store::AppStore;
@@ -10,15 +12,13 @@ use aimer::animation::AnimationController;
 use aimer::decoration::*;
 use aimer::indicator::{TabBar, TabItem, indicator_styles};
 use aimer::router::Navigator;
+use aimer::screen::MediaQuery;
 use aimer::style::{BoxShadow, LayoutSpacing, Theme};
 use aimer::{
     Align, Alignment, AnyWidget, BoxAlignment, BuildContext, Color, Container, Icons,
     JustifyContent, ProviderContext, Row, StatelessWidget, StaticSvg, Svg, SvgAsset, SvgStyle,
     Widget,
 };
-
-/// Windows narrower than this (logical pixels) get the floating tab bar.
-pub const MOBILE_BREAKPOINT: f32 = 600.0;
 
 /// Where a tab's icon comes from: the app's own SVG files, or the Lucide set.
 #[derive(Clone, Copy)]
@@ -51,6 +51,24 @@ pub fn bar_width(tabs: usize) -> f32 {
     TAB_WIDTH * 1.1 * tabs as f32 + BAR_PADDING as f32 * 2.0
 }
 pub const BAR_HEIGHT: f32 = TAB_HEIGHT + BAR_PADDING as f32 * 2.0;
+
+/// The side of a tab in the vertical rail: a symbol, as the rail has no room for
+/// words, and large enough to press.
+const RAIL_TAB: f32 = 48.0;
+/// The room the rail keeps round its tabs.
+const RAIL_PADDING: u32 = 6;
+/// How far the rail floats from the trailing edge of the window.
+pub const RAIL_MARGIN: u32 = 8;
+/// How wide the rail is.
+pub const RAIL_WIDTH: f32 = RAIL_TAB + RAIL_PADDING as f32 * 2.0;
+/// How much of the window's width the rail takes, margins included: what a page
+/// beside it keeps clear.
+pub const RAIL_SPACE: f32 = RAIL_WIDTH + RAIL_MARGIN as f32 * 2.0;
+
+/// How tall the rail is with `tabs` in it.
+pub fn rail_height(tabs: usize) -> f32 {
+    RAIL_TAB * tabs as f32 + RAIL_PADDING as f32 * 2.0
+}
 /// How large the bar is when it starts to appear: as little over its size as the
 /// room it has in a narrow window allows, as it is nearly as wide as one.
 const REVEAL_SCALE_FROM: f32 = 1.1;
@@ -70,11 +88,34 @@ const ICON_SIZE: u32 = 24;
 #[derive(Clone, StatelessWidget)]
 pub struct MobileNavbar {
     reveal: AnimationController,
+    vertical: bool,
+    /// Whether the page has a button in the column on the trailing edge, which the
+    /// rail stands clear of.
+    beside_column: bool,
 }
 
 impl MobileNavbar {
     pub fn new(reveal: AnimationController) -> Self {
-        Self { reveal }
+        Self {
+            reveal,
+            vertical: false,
+            beside_column: false,
+        }
+    }
+
+    /// Tells the rail the page has a button in the column above it, so the rail
+    /// is pushed down where it would meet it.
+    pub fn beside_column(mut self, beside_column: bool) -> Self {
+        self.beside_column = beside_column;
+        self
+    }
+
+    /// Stands the bar along the trailing edge instead of floating it along the
+    /// bottom, for a window that is wide but short: the controls stay by the
+    /// hardware's own, and the page keeps its height.
+    pub fn vertical(mut self, vertical: bool) -> Self {
+        self.vertical = vertical;
+        self
     }
 }
 
@@ -91,6 +132,61 @@ impl StatelessWidget for MobileNavbar {
         // the navigator and only proposes where the user would like to go.
         let selection = selected_tab(tabs.tabs(), |route| navigator.contains_route(route));
         let width = bar_width(tabs.len());
+
+        if self.vertical {
+            let chosen_count = tabs.len();
+            let height = rail_height(tabs.len());
+            let rail = ButtonReveal::new(
+                self.reveal.clone(),
+                RAIL_WIDTH,
+                height,
+                RAIL_WIDTH / 2.0,
+                move || {
+                    let navigator = navigator.clone();
+                    let tabs = tabs.clone();
+                    let chosen = tabs.tabs().to_vec();
+                    rail(theme, &chosen, selection, move |index| {
+                        let route = tabs.tabs()[index].route();
+                        if navigator.current_route() != route {
+                            navigator.set_route(route);
+                        }
+                    })
+                },
+            )
+            .scale_from(REVEAL_SCALE_FROM)
+            .boxed();
+
+            // On the line of the system's own controls, in the middle of the band
+            // it keeps along the edge.
+            let system = ctx.watch_safe_area_insets();
+            let right = crate::layout::rail_margin(system.right);
+            // Halfway down the edge, pushed down just far enough to clear the
+            // column's button where the page has one, or in the bottom corner
+            // where the window has no room for that.
+            let window_height = MediaQuery::of(ctx).size.height;
+            let clear = if self.beside_column {
+                column_clear(system.top)
+            } else {
+                0.0
+            };
+            let (alignment, top, bottom) =
+                match crate::layout::rail_place(window_height, chosen_count, clear) {
+                    RailPlace::Middle => (Alignment::MidRight, 0, 0),
+                    RailPlace::Below(top) => (Alignment::TopRight, top.round() as u32, 0),
+                    RailPlace::Corner => (Alignment::BotRight, 0, RAIL_MARGIN),
+                };
+            return Align::new().alignment(alignment).box_child(
+                Container::new()
+                    .padding(
+                        LayoutSpacing::new()
+                            .left(RAIL_MARGIN)
+                            .right(right)
+                            .top(top)
+                            .bottom(bottom),
+                    )
+                    .child(rail),
+            );
+        }
 
         // The bar is given as a function, as it is built afresh on every frame of
         // its coming in and going out.
@@ -161,20 +257,20 @@ const GLASS_TINT_ALPHA: f32 = 0.45;
 /// The frosted glass the tab bar and the avatar circle are both made of: the
 /// page behind them blurred, tinted with the surface color, with a light edge.
 pub fn glass(theme: ForumTheme) -> impl Decoration {
+    type Style = MagnificationStyle;
     GlassDecoration::new(theme.surface_color().with_alpha(0.3))
         .light_edge(LightEdge::new().width(3.0).strength(0.6))
         .lens(
             Magnification::new()
-                .zoom(1.4)
-                .thickness(32.0)
+                .zoom(1.2)
+                .thickness(8.0)
                 .bulge(0.2)
-                .style(
-                    MagnificationStyle::REFRACTION | MagnificationStyle::BULGE
-                ),
+                .bulge_radius(8.0)
+                .style(Style::REFRACTION | Style::UNIFORM | Style::BULGE),
         )
         .backdrop(
             BackdropFilter::new()
-                .blur_radius(6.0)
+                .blur_radius(4.0)
                 .saturation(0.65)
                 .brightness(1.0)
                 .contrast(0.9),
@@ -207,6 +303,32 @@ fn tab_bar(
         .boxed()
 }
 
+/// The tabs stacked, themed like [`tab_bar`]: the same frosted glass and liquid
+/// glass lens, standing up. Each is a symbol only, as text-based buttons are kept
+/// to a minimum on the vertical axis.
+fn rail(
+    theme: ForumTheme,
+    tabs: &[NavTab],
+    selection: Option<usize>,
+    on_select: impl Fn(usize) + 'static,
+) -> AnyWidget {
+    TabBar::new()
+        .vertical()
+        .selection(selection)
+        .on_select(on_select)
+        .item_size(RAIL_TAB, RAIL_TAB)
+        .bar_padding(LayoutSpacing::all(RAIL_PADDING))
+        .bar_decoration(glass(theme))
+        .inactive_color(theme.on_surface_color())
+        .selected_color(theme.primary_color())
+        .style(indicator_styles::LIQUID_GLASS.rest_fill(theme.primary_color().with_alpha(0.2)))
+        .items(tabs.iter().map(|tab| {
+            let icon = icon_of(*tab);
+            TabItem::new().icon(move |tint| tab_icon(theme, icon, tint))
+        }))
+        .boxed()
+}
+
 /// A tab's icon, drawn in `tint`.
 pub fn tab_icon(theme: ForumTheme, icon: TabIcon, tint: Color) -> AnyWidget {
     match icon {
@@ -235,15 +357,24 @@ mod tests {
         let tabs = NavTab::ALL;
         for (index, tab) in tabs.iter().enumerate() {
             let route = tab.route();
-            assert_eq!(selected_tab(&tabs, |candidate| *candidate == route), Some(index));
+            assert_eq!(
+                selected_tab(&tabs, |candidate| *candidate == route),
+                Some(index)
+            );
         }
     }
 
     #[test]
     fn a_tab_taken_off_the_bar_selects_nothing_and_the_others_keep_their_place() {
         let tabs = NavbarTabs::default().toggled(NavTab::New);
-        assert_eq!(selected_tab(tabs.tabs(), |route| *route == AppRouter::New), None);
-        assert_eq!(selected_tab(tabs.tabs(), |route| *route == AppRouter::Hot), Some(1));
+        assert_eq!(
+            selected_tab(tabs.tabs(), |route| *route == AppRouter::New),
+            None
+        );
+        assert_eq!(
+            selected_tab(tabs.tabs(), |route| *route == AppRouter::Hot),
+            Some(1)
+        );
     }
 
     #[test]
@@ -278,6 +409,13 @@ mod tests {
                 assert!(SIDE_BAR_ICONS.contains(&icon), "{icon}");
             }
         }
+    }
+
+    #[test]
+    fn the_rail_grows_with_its_tabs_and_has_room_for_its_margins() {
+        assert!(rail_height(3) < rail_height(5));
+        assert_eq!(rail_height(0), RAIL_PADDING as f32 * 2.0);
+        assert!(RAIL_SPACE > RAIL_WIDTH);
     }
 
     #[test]

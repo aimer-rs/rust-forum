@@ -6,7 +6,7 @@ pub use email_code::EmailCodeScreen;
 pub use password::PasswordScreen;
 
 use crate::api::session::{self, PasskeyOutcome};
-use crate::app_shell::{MOBILE_TOP, is_mobile};
+use crate::app_shell::{beside_buttons, content_top, is_mobile};
 use crate::components::auth_button::{Glyph, filled_icon_button, outlined_button, text_button};
 use crate::components::page_title::PageTitle;
 use crate::router::AppRouter;
@@ -158,7 +158,7 @@ impl State<LoginScreen> for LoginState {
         let mut page: Vec<AnyWidget> = vec![
             // Clear of the bar over the page, with its back button.
             SizedBox::new()
-                .height(case!(is_mobile(ctx), MOBILE_TOP) + 56)
+                .height(content_top(ctx) + 56)
                 .boxed(),
             Expanded::new().box_child(
                 Align::new()
@@ -215,12 +215,15 @@ impl State<LoginScreen> for LoginState {
         Container::new()
             .color(theme.background_color())
             .padding(LayoutSpacing::horizontal(24.into()))
-            .child(centred(
+            .child(beside_buttons(
                 ctx,
-                Column::new()
-                    .horizontal_alignment(BoxAlignment::Center)
-                    .gaps(LayoutSpacing::all(12).top(6).bottom(6))
-                    .children(page),
+                centred(
+                    ctx,
+                    Column::new()
+                        .horizontal_alignment(BoxAlignment::Center)
+                        .gaps(LayoutSpacing::all(12).top(6).bottom(6))
+                        .children(page),
+                ),
             ))
     }
 }
@@ -396,11 +399,12 @@ fn form_page(
         .child(
             Scrollable::new()
                 .key(format!("scrollable-{title}"))
-                .box_child(
+                .box_child(beside_buttons(
+                    ctx,
                     Column::new().children([
                         // Clear of the bar over the page, with its back button.
                         SizedBox::new()
-                            .height(case!(is_mobile(ctx), MOBILE_TOP) + 70)
+                            .height(content_top(ctx) + 70)
                             .boxed(),
                         Container::new()
                             .padding(LayoutSpacing::horizontal(24.into()))
@@ -408,7 +412,7 @@ fn form_page(
                             .boxed(),
                         SizedBox::new().height(90).boxed(),
                     ]),
-                ),
+                )),
         )
         .boxed()
 }

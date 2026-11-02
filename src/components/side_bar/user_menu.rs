@@ -1,9 +1,11 @@
 use std::time::Duration;
 
 use crate::api::session;
+use crate::app_shell::has_windows;
 use crate::components::avatar::round_avatar;
 use crate::components::windows;
 use crate::models::comments::avatar_url;
+use crate::router::AppRouter;
 use crate::store::AppStore;
 use crate::theme::ForumTheme;
 use aimer::animation::curves;
@@ -11,6 +13,7 @@ use aimer::input::button::Button;
 use aimer::modal::{
     Anchor, AnchorHandle, Floating, FloatingAlign, FloatingSide, ModalAnimation, ModalController,
 };
+use aimer::router::NavigatorController;
 use aimer::style::{BoxDecoration, BoxShadow, LayoutSpacing, TextAlign, TextStyle, Theme};
 use aimer::{
     Align, AnyWidget, BoxAlignment, BuildContext, Color, Column, Container, Dimension, Icons,
@@ -42,6 +45,8 @@ impl StatelessWidget for UserMenuButton {
         let theme = *ForumTheme::of(ctx);
         let store = ProviderHandle::<AppStore>::of(ctx);
         let anchor = AnchorHandle::new();
+        let navigator = NavigatorController::<AppRouter>::of(ctx);
+        let windowed = has_windows(ctx);
         let member = ctx.select::<AppStore, Option<Member>>(|store| {
             store.current_user.as_ref().map(|username| Member {
                 username: username.clone(),
@@ -79,7 +84,13 @@ impl StatelessWidget for UserMenuButton {
                         .align(FloatingAlign::Start)
                         .gap(6.0)
                         .animation(enter_animation())
-                        .child(menu_panel(theme, store.clone(), signed_in))
+                        .child(menu_panel(
+                            theme,
+                            store.clone(),
+                            navigator.clone(),
+                            windowed,
+                            signed_in,
+                        ))
                         .show();
                 }
             })
@@ -141,18 +152,39 @@ pub fn sized_avatar(theme: ForumTheme, size: f32) -> impl Widget {
 }
 
 /// The dropdown panel: a rounded, shadowed card holding one row per action.
-fn menu_panel(theme: ForumTheme, store: ProviderHandle<AppStore>, signed_in: bool) -> impl Widget {
+fn menu_panel(
+    theme: ForumTheme,
+    store: ProviderHandle<AppStore>,
+    navigator: NavigatorController<AppRouter>,
+    windowed: bool,
+    signed_in: bool,
+) -> impl Widget {
     let border = theme.box_decor().border;
 
-    // Each opens in a window of its own, not as a page of the app.
+    // On a computer each opens in a window of its own; elsewhere, as iOS, it is a
+    // page of the app.
     let settings = {
         let store = store.clone();
-        menu_item("Settings", theme, move || windows::open_settings(&store))
+        let navigator = navigator.clone();
+        menu_item("Settings", theme, move || {
+            if windowed {
+                windows::open_settings(&store);
+            } else {
+                navigator.push(AppRouter::Settings);
+            }
+        })
     };
     let items = if signed_in {
         let profile = {
             let store = store.clone();
-            menu_item("Profile", theme, move || windows::open_profile(&store))
+            let navigator = navigator.clone();
+            menu_item("Profile", theme, move || {
+                if windowed {
+                    windows::open_profile(&store);
+                } else {
+                    navigator.set_route(AppRouter::Account);
+                }
+            })
         };
         // Unlike the settings this does not ask twice: the menu was opened on
         // purpose, and a choice in it is one press.
@@ -161,7 +193,14 @@ fn menu_panel(theme: ForumTheme, store: ProviderHandle<AppStore>, signed_in: boo
     } else {
         let sign_in = {
             let store = store.clone();
-            menu_item("Sign in", theme, move || windows::open_login(&store))
+            let navigator = navigator.clone();
+            menu_item("Sign in", theme, move || {
+                if windowed {
+                    windows::open_login(&store);
+                } else {
+                    navigator.push(AppRouter::Login);
+                }
+            })
         };
         vec![sign_in, settings]
     };
@@ -249,6 +288,8 @@ mod tests {
     thread_local! {
         static SEEN: std::cell::RefCell<Option<(ProviderHandle<AppStore>, NavigatorController<AppRouter>)>> =
             const { std::cell::RefCell::new(None) };
+        /// Whether the panel is built for a computer, with windows of their own.
+        static WINDOWED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
     }
 
     /// The panel on its own, at the top left of the window, keeping hold of the
@@ -264,7 +305,11 @@ mod tests {
             SEEN.with(|seen| *seen.borrow_mut() = Some((store.clone(), navigator.clone())));
             AnimatedTheme::new()
                 .data(ForumTheme::light())
-                .child(Themed { store, signed_in })
+                .child(Themed {
+                    store,
+                    navigator,
+                    signed_in,
+                })
         }
     }
 
@@ -272,6 +317,7 @@ mod tests {
     #[derive(Clone, StatelessWidget)]
     struct Themed {
         store: ProviderHandle<AppStore>,
+        navigator: NavigatorController<AppRouter>,
         signed_in: bool,
     }
 
@@ -282,6 +328,8 @@ mod tests {
                 .child(menu_panel(
                     *ForumTheme::of(ctx),
                     self.store.clone(),
+                    self.navigator.clone(),
+                    WINDOWED.with(|windowed| windowed.get()),
                     self.signed_in,
                 ))
         }
@@ -339,6 +387,17 @@ mod tests {
         assert!(windows().profile && windows().dialog.is_none());
         // The app stays on the page it was on.
         assert!(route() == AppRouter::Latest);
+    }
+
+    #[test]
+    fn without_windows_profile_is_the_account_page_of_the_app() {
+        WINDOWED.with(|windowed| windowed.set(false));
+        let mut app = open(true);
+        testing::tap(&mut app, 1, row(0));
+        testing::settle(&mut app);
+        WINDOWED.with(|windowed| windowed.set(true));
+        assert!(!windows().profile && windows().dialog.is_none());
+        assert!(route() == AppRouter::Account);
     }
 
     #[test]

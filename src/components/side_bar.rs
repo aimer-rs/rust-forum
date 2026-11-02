@@ -16,11 +16,13 @@ use aimer::animation::{Animatable, ImplicitAnimatedBuilder, curves};
 use aimer::style::{BoxDecoration, LayoutSpacing, Theme};
 use aimer::{
     BoxAlignment, BuildContext, Color, Column, Container, Dimension, Direction, Expanded, Row,
-    Scrollable, SizedBox, State, StateUpdater, StatefulWidget, Widget,
+    Scrollable, SizedBox, State, StateUpdater, StatefulWidget, StatelessWidget, Widget,
 };
 use aimer::{Resizable};
 
-pub use mobile_bar::{BAR_HEIGHT, MOBILE_BREAKPOINT, MobileNavbar, bar_width, glass, icon_of, preview_bar, tab_icon};
+pub use mobile_bar::{
+    BAR_HEIGHT, MobileNavbar, RAIL_MARGIN, RAIL_SPACE, RAIL_WIDTH, rail_height, bar_width, glass, icon_of, preview_bar, tab_icon,
+};
 
 pub(crate) const SIDE_BAR_ICONS: &[&str] = &[
     "assets/app-apps-applications-tiles-svgrepo-com(1).svg",
@@ -39,7 +41,9 @@ const BORDER_WIDTH: f32 = 1.0;
 /// What the resize highlight adds beside it.
 const HIGHLIGHT_WIDTH: f32 = 2.0;
 
-#[derive(StatefulWidget)]
+
+/// The sidebar. It keeps its own width whatever the state of the hinge.
+#[derive(Clone, StatelessWidget)]
 pub struct AppSideBar;
 
 impl AppSideBar {
@@ -48,23 +52,39 @@ impl AppSideBar {
     }
 }
 
-pub struct AppSidebarState {
+impl StatelessWidget for AppSideBar {
+    fn build(&self, _ctx: &BuildContext) -> impl Widget {
+        ResizableSidebar::new()
+    }
+}
+
+/// The sidebar at its own width, which the pointer can change at its right edge.
+#[derive(StatefulWidget)]
+struct ResizableSidebar;
+
+impl ResizableSidebar {
+    fn new() -> Self {
+        Self
+    }
+}
+
+struct ResizableSidebarState {
     resizable: bool,
     updater: StateUpdater<Self>,
 }
 
-impl StatefulWidget for AppSideBar {
-    type State = AppSidebarState;
+impl StatefulWidget for ResizableSidebar {
+    type State = ResizableSidebarState;
 
     fn create_state(self) -> Self::State {
-        AppSidebarState {
+        ResizableSidebarState {
             resizable: false,
             updater: StateUpdater::new(),
         }
     }
 }
 
-impl State<AppSideBar> for AppSidebarState {
+impl State<ResizableSidebar> for ResizableSidebarState {
     fn init_state(&mut self, updater: StateUpdater<Self>)
     where
         Self: Sized,

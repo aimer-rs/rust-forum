@@ -1,5 +1,5 @@
 use crate::api::Api;
-use crate::app_shell::{MOBILE_TOP, is_mobile};
+use crate::app_shell::{MOBILE_TOP, beside_buttons, content_top, is_mobile};
 use crate::components::avatar::round_avatar;
 use crate::components::search_header::STACKED_EXTRA;
 use crate::components::topic_card::{TopicCard, divider_decor};
@@ -59,7 +59,7 @@ impl StatelessWidget for SearchScreen {
         let mode = ctx.select::<AppStore, SearchMode>(|s| s.search_mode);
 
         // The bar is two rows tall on a narrow window, under the status bar.
-        let top = case!(is_mobile(ctx), MOBILE_TOP + STACKED_EXTRA as u32) as f32 + 70.0;
+        let top = (content_top(ctx) + case!(is_mobile(ctx), STACKED_EXTRA as u32)) as f32 + 70.0;
         let window = MediaQuery::select(ctx, |media| media.size.height);
         // What a message has to centre itself in: the window under the bar.
         let room = (window - top - BOTTOM_SPACE).max(240.0);
@@ -132,11 +132,14 @@ impl StatelessWidget for SearchScreen {
         Container::new().color(theme.background_color()).child(
             Scrollable::new()
                 .key("search-scroll")
-                .box_child(Column::new().children([
-                    SizedBox::new().height(top).boxed(),
-                    body,
-                    SizedBox::new().height(BOTTOM_SPACE).boxed(),
-                ])),
+                .box_child(beside_buttons(
+                    ctx,
+                    Column::new().children([
+                        SizedBox::new().height(top).boxed(),
+                        body,
+                        SizedBox::new().height(BOTTOM_SPACE).boxed(),
+                    ]),
+                )),
         )
     }
 }

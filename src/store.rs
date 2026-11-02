@@ -76,6 +76,11 @@ pub struct AppStore {
 pub struct CommentThread {
     pub comments: Vec<Rc<Comment>>,
     pub status: StreamStatus,
+    /// The ids of the posts the topic document did not carry, in topic order.
+    /// Set once by [`AppStore::start_comments`]; shared so a clone is a bump.
+    pending: Rc<[i64]>,
+    /// How many of `pending` have been handed out to be fetched.
+    cursor: usize,
 }
 
 /// The streaming state of one topic-list request.
@@ -83,12 +88,17 @@ pub struct CommentThread {
 pub struct TopicStream {
     pub topics: Vec<Shared<Topic>>,
     pub status: StreamStatus,
+    /// The `?page=` to ask for next; `0` is the path as it stands.
+    next_page: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub enum StreamStatus {
     #[default]
     Loading,
+    /// More is available but nothing has asked for it yet; a comment thread or
+    /// topic list waits here until the reader scrolls near its end.
+    Idle,
     Done,
     Error(String),
 }
@@ -198,8 +208,79 @@ impl AppStore {
         thread.comments.sort_by_key(|comment| comment.post_number);
     }
 
-    pub fn finish_comments(&mut self, topic_id: i64) {
-        self.threads.entry(topic_id).or_default().status = StreamStatus::Done;
+    /// Whether a thread was ever opened for the topic.
+    pub fn has_comment_thread(&self, topic_id: i64) -> bool {
+        self.threads.contains_key(&topic_id)
+    }
+
+    /// Whether a chunk is waiting to be asked for: the thread is idle with ids
+    /// left. A plain lookup, for callers that ask on every scroll frame.
+    pub fn wants_more_comments(&self, topic_id: i64) -> bool {
+        self.threads.get(&topic_id).is_some_and(|thread| {
+            thread.status == StreamStatus::Idle && thread.cursor < thread.pending.len()
+        })
+    }
+
+    /// Opens a topic's thread with the posts its document carried and the ids of
+    /// those it did not (`missing`, in topic order), which are fetched later, a
+    /// chunk at a time, as the reader nears the end.
+    ///
+    /// A thread that is already open is left as it is: the loader runs again
+    /// whenever the page is rebuilt, and must not rewind a thread underway.
+    pub fn start_comments(&mut self, topic_id: i64, initial: Vec<Comment>, missing: Vec<i64>) {
+        if self.threads.contains_key(&topic_id) {
+            return;
+        }
+        let status = if missing.is_empty() {
+            StreamStatus::Done
+        } else {
+            StreamStatus::Idle
+        };
+        self.threads.insert(
+            topic_id,
+            CommentThread {
+                comments: Vec::new(),
+                status,
+                pending: missing.into(),
+                cursor: 0,
+            },
+        );
+        self.push_comments(topic_id, initial);
+    }
+
+    /// Hands out the next up to `limit` ids still to be fetched and marks the
+    /// thread `Loading`, or returns `None` when a request is already on its way,
+    /// nothing is left, or the thread failed. Only one request is ever in
+    /// flight, so it is safe to ask on every scroll event.
+    pub fn claim_comment_chunk(&mut self, topic_id: i64, limit: usize) -> Option<Vec<i64>> {
+        let thread = self.threads.get_mut(&topic_id)?;
+        if thread.status != StreamStatus::Idle {
+            return None;
+        }
+        let end = (thread.cursor + limit).min(thread.pending.len());
+        let chunk = thread.pending[thread.cursor..end].to_vec();
+        if chunk.is_empty() {
+            return None;
+        }
+        thread.cursor = end;
+        thread.status = StreamStatus::Loading;
+        Some(chunk)
+    }
+
+    /// Marks the chunk just pushed as in: `Idle` while ids remain, `Done` after
+    /// the last. Leaves a failed thread failed.
+    pub fn settle_comments(&mut self, topic_id: i64) {
+        let Some(thread) = self.threads.get_mut(&topic_id) else {
+            return;
+        };
+        if matches!(thread.status, StreamStatus::Error(_)) {
+            return;
+        }
+        thread.status = if thread.cursor < thread.pending.len() {
+            StreamStatus::Idle
+        } else {
+            StreamStatus::Done
+        };
     }
 
     pub fn fail_comments(&mut self, topic_id: i64, error: String) {
@@ -237,20 +318,51 @@ impl AppStore {
             })
     }
 
+    /// Adds a topic to a list. One already in it is left alone: the forum's pages
+    /// shift as topics are bumped, so the next page may repeat the last one's end.
     pub fn push_stream_topic(&mut self, path: ShareRef<str>, topic: Topic) {
-        self.streams
-            .entry(path)
-            .or_default()
-            .topics
-            .push(Shared::new(topic));
+        let stream = self.streams.entry(path).or_default();
+        if stream.topics.iter().any(|known| known.id == topic.id) {
+            return;
+        }
+        stream.topics.push(Shared::new(topic));
     }
 
-    pub fn finish_stream(&mut self, path: ShareRef<str>) {
-        self.streams.entry(path).or_default().status = StreamStatus::Done;
+    /// Marks the page just streamed as in: `Idle` when the forum has `more`
+    /// after it, `Done` when it was the last.
+    pub fn finish_stream(&mut self, path: ShareRef<str>, page: u32, more: bool) {
+        let stream = self.streams.entry(path).or_default();
+        stream.next_page = stream.next_page.max(page + 1);
+        stream.status = if more {
+            StreamStatus::Idle
+        } else {
+            StreamStatus::Done
+        };
     }
 
     pub fn fail_stream(&mut self, path: ShareRef<str>, error: String) {
         self.streams.entry(path).or_default().status = StreamStatus::Error(error);
+    }
+
+    /// Whether a page of a list is waiting to be asked for. A plain lookup, for
+    /// callers that ask on every scroll frame.
+    pub fn wants_more_topics(&self, path: &str) -> bool {
+        self.streams
+            .get(path)
+            .is_some_and(|stream| stream.status == StreamStatus::Idle)
+    }
+
+    /// Hands out the next page of a list and marks it `Loading`, or returns
+    /// `None` when a request is already on its way, the list is at its end, or it
+    /// failed. Only one request is ever in flight, so it is safe to ask on every
+    /// scroll event.
+    pub fn claim_topic_page(&mut self, path: &str) -> Option<u32> {
+        let stream = self.streams.get_mut(path)?;
+        if stream.status != StreamStatus::Idle {
+            return None;
+        }
+        stream.status = StreamStatus::Loading;
+        Some(stream.next_page)
     }
 
     pub fn category_name(&self, id: i64) -> Option<ShareRef<str>> {
@@ -342,6 +454,54 @@ mod tests {
     }
 
     #[test]
+    fn a_list_hands_out_its_next_page_once_and_only_while_more_remains() {
+        let mut store = AppStore::default();
+        let path = ShareRef::from_static("latest.json");
+        store.push_stream_topic(path.clone(), topic(1, "First"));
+
+        // The first page is still streaming: nothing to ask for.
+        assert!(!store.wants_more_topics("latest.json"));
+        assert_eq!(store.claim_topic_page("latest.json"), None);
+
+        store.finish_stream(path.clone(), 0, true);
+        assert!(store.wants_more_topics("latest.json"));
+        // A scroll event per frame must not start the same request twice.
+        assert_eq!(store.claim_topic_page("latest.json"), Some(1));
+        assert_eq!(store.claim_topic_page("latest.json"), None);
+        assert_eq!(store.topic_stream("latest.json").status, StreamStatus::Loading);
+
+        store.finish_stream(path.clone(), 1, true);
+        assert_eq!(store.claim_topic_page("latest.json"), Some(2));
+
+        store.finish_stream(path, 2, false);
+        assert_eq!(store.topic_stream("latest.json").status, StreamStatus::Done);
+        assert_eq!(store.claim_topic_page("latest.json"), None);
+    }
+
+    #[test]
+    fn a_topic_the_next_page_repeats_is_listed_once() {
+        let mut store = AppStore::default();
+        let path = ShareRef::from_static("latest.json");
+        store.push_stream_topic(path.clone(), topic(1, "First"));
+        store.push_stream_topic(path, topic(1, "First"));
+
+        assert_eq!(store.topic_stream("latest.json").topics.len(), 1);
+    }
+
+    #[test]
+    fn a_failed_page_is_not_asked_for_again_by_scrolling() {
+        let mut store = AppStore::default();
+        let path = ShareRef::from_static("latest.json");
+        store.push_stream_topic(path.clone(), topic(1, "First"));
+        store.finish_stream(path.clone(), 0, true);
+        store.claim_topic_page("latest.json");
+        store.fail_stream(path, "offline".to_owned());
+
+        assert!(!store.wants_more_topics("latest.json"));
+        assert_eq!(store.claim_topic_page("latest.json"), None);
+    }
+
+    #[test]
     fn signing_in_drops_the_lists_fetched_as_a_guest() {
         let mut store = AppStore::default();
         let path = ShareRef::from_static("new.json");
@@ -410,5 +570,98 @@ mod tests {
         store.cache_search("apple", SearchMode::Blog, hits.clone());
         assert_eq!(store.last_search(SearchMode::Blog), Some(hits));
         assert!(store.last_search(SearchMode::User).is_none());
+    }
+
+    fn reply(post_number: i64) -> Comment {
+        Comment {
+            post_number,
+            reply_to: None,
+            username: format!("user{post_number}"),
+            avatar_url: String::new(),
+            created_at: String::new(),
+            like_count: 0,
+            markdown: Rc::from(""),
+        }
+    }
+
+    #[test]
+    fn a_thread_with_posts_left_waits_until_they_are_asked_for() {
+        let mut store = AppStore::default();
+        store.start_comments(1, vec![reply(2)], vec![3, 4, 5]);
+
+        let thread = store.comment_thread(1);
+        assert_eq!(thread.comments.len(), 1);
+        assert_eq!(thread.status, StreamStatus::Idle);
+    }
+
+    #[test]
+    fn a_thread_with_nothing_left_is_done() {
+        let mut store = AppStore::default();
+        store.start_comments(1, vec![reply(2)], vec![]);
+
+        assert_eq!(store.comment_thread(1).status, StreamStatus::Done);
+        assert_eq!(store.claim_comment_chunk(1, 20), None);
+    }
+
+    #[test]
+    fn asking_for_more_hands_out_one_chunk_and_blocks_a_second_ask() {
+        let mut store = AppStore::default();
+        store.start_comments(1, vec![], vec![3, 4, 5]);
+
+        assert_eq!(store.claim_comment_chunk(1, 2), Some(vec![3, 4]));
+        assert_eq!(store.comment_thread(1).status, StreamStatus::Loading);
+        // A scroll event per frame must not start the same request twice.
+        assert_eq!(store.claim_comment_chunk(1, 2), None);
+    }
+
+    #[test]
+    fn settling_a_chunk_allows_the_next_until_the_last_is_in() {
+        let mut store = AppStore::default();
+        store.start_comments(1, vec![], vec![3, 4, 5]);
+
+        assert_eq!(store.claim_comment_chunk(1, 2), Some(vec![3, 4]));
+        store.push_comments(1, vec![reply(3), reply(4)]);
+        store.settle_comments(1);
+        assert_eq!(store.comment_thread(1).status, StreamStatus::Idle);
+
+        assert_eq!(store.claim_comment_chunk(1, 2), Some(vec![5]));
+        store.push_comments(1, vec![reply(5)]);
+        store.settle_comments(1);
+        assert_eq!(store.comment_thread(1).status, StreamStatus::Done);
+        assert_eq!(store.claim_comment_chunk(1, 2), None);
+    }
+
+    #[test]
+    fn a_failed_chunk_ends_the_requests_for_that_thread() {
+        let mut store = AppStore::default();
+        store.start_comments(1, vec![], vec![3, 4]);
+        assert_eq!(store.claim_comment_chunk(1, 2), Some(vec![3, 4]));
+
+        store.fail_comments(1, "offline".to_owned());
+
+        assert_eq!(store.claim_comment_chunk(1, 2), None);
+        assert_eq!(
+            store.comment_thread(1).status,
+            StreamStatus::Error("offline".to_owned())
+        );
+    }
+
+    #[test]
+    fn asking_about_a_topic_with_no_thread_hands_out_nothing() {
+        let mut store = AppStore::default();
+        assert_eq!(store.claim_comment_chunk(9, 20), None);
+    }
+
+    #[test]
+    fn starting_a_thread_again_does_not_reset_one_that_is_underway() {
+        let mut store = AppStore::default();
+        store.start_comments(1, vec![reply(2)], vec![3, 4, 5]);
+        assert_eq!(store.claim_comment_chunk(1, 2), Some(vec![3, 4]));
+
+        // The page is rebuilt and its loader runs again with the same topic.
+        store.start_comments(1, vec![reply(2)], vec![3, 4, 5]);
+
+        assert_eq!(store.comment_thread(1).status, StreamStatus::Loading);
+        assert_eq!(store.comment_thread(1).comments.len(), 1);
     }
 }

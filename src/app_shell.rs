@@ -2,19 +2,22 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use crate::api::session;
-use crate::preferences;
 use crate::components::post_action_bar::{ActionBar, SearchControls};
+use crate::components::side_bar::{AppSideBar, MobileNavbar};
 use crate::components::windows::WindowsLayer;
-use crate::components::side_bar::{AppSideBar, MOBILE_BREAKPOINT, MobileNavbar};
+use crate::layout::{
+    ShellLayout, content_insets, current_fold_posture, padding_of,
+    rail_band, rail_padding, shell_layout,
+};
+use crate::preferences;
 use crate::router::AppRouter;
 use crate::store::AppStore;
 use crate::theme::ForumTheme;
 use aimer::Dimension::Percent;
 use aimer::animation::{AnimationController, AnimationStatus, StatusListener, curves};
-use aimer::share::ShareRef;
-use aimer::screen::MediaQuery;
 use aimer::router::{Navigator, Outlet};
-use aimer::style::{AnimatedTheme, Theme, ThemeMode};
+use aimer::share::ShareRef;
+use aimer::style::{AnimatedTheme, LayoutSpacing, Theme, ThemeMode};
 use aimer::*;
 
 #[derive(Clone, StatefulWidget)]
@@ -78,51 +81,115 @@ impl StatelessWidget for ShellFrame {
         // Only the answer is watched, so a window drag rebuilds this at the breakpoint
         // and nowhere else.
 
-        let mobile = is_mobile(ctx);
+        let layout = shell_layout(ctx);
+        let mobile = layout.is_compact();
+        // A wide but short window keeps the page's height: its tabs stand in a rail
+        // along the trailing edge, beside the page.
+        let rail = layout == ShellLayout::Rail;
+        // The buttons of the bar stand in a column on the trailing edge in the rail
+        // layout, and wherever a fold divides the display, so none lies along the
+        // top of the page.
+        let column = buttons_in_column(ctx);
+        // What the side safe areas and a fold of the display take from the window.
+        let insets = content_insets(ctx);
         // The shell stays mounted across routes, so it is told nothing about
         // them; the navigator is where the current one is read.
         let route = Navigator::<AppRouter>::of(ctx).current_route();
         // The page, with the action bar floating over its top edge.
+        let outlet = SizedBox::new()
+            .width(Percent(100.0))
+            .height(Percent(100.0))
+            .box_child(Outlet);
+        // The page has the whole window, so its scrollbar stands at the edge; the
+        // pages keep their content clear of the column inside their scrollables
+        // (see [`beside_buttons`]).
+        let page = outlet.boxed();
         let mut content = vec![
             restore_session(ProviderHandle::<AppStore>::of(ctx)),
             restore_preferences(ProviderHandle::<AppStore>::of(ctx)),
-            SizedBox::new()
-                .width(Percent(100.0))
-                .height(Percent(100.0))
-                .box_child(Outlet),
-            Positioned::new()
-                .layer(3)
-                .top(case!(mobile, MOBILE_TOP))
-                .box_child(ActionBarSlot::new(route.clone())),
+            page,
         ];
-
-        Container::new()
-            .color(theme.background_color())
-            .child(if mobile {
-                content.push(NavbarSlot::new(route).boxed());
-                Stack::new().children(content).boxed()
-            } else {
-                let window = Row::new()
-                    .justify_content(JustifyContent::SpaceBetween)
-                    .children([
-                        AppSideBar::new().boxed(),
-                        Expanded::new()
-                            .flex(0.95)
-                            .box_child(Stack::new().children(content)),
-                    ]);
-                // Settings, the sign-in and the profile open in windows of their own.
-                Stack::new()
-                    .children([
-                        SizedBox::new()
-                            .width(Percent(100.0))
-                            .height(Percent(100.0))
-                            .box_child(window),
-                        // Takes no room: it declares those windows, which are open
-                        // while the store says so.
-                        WindowsLayer.boxed(),
-                    ])
+        if !rail {
+            content.push(if column {
+                Positioned::new()
+                    .layer(3)
+                    .box_child(ActionBarSlot::new(route.clone(), true))
                     .boxed()
-            })
+            } else {
+                Positioned::new()
+                    .layer(3)
+                    .top(case!(mobile, MOBILE_TOP))
+                    .box_child(ActionBarSlot::new(route.clone(), false))
+                    .boxed()
+            });
+        }
+
+        let frame = Container::new().color(theme.background_color());
+        // A window with no safe area to keep clear of keeps the shell as it was,
+        // with no padding at all.
+        let frame = if rail {
+            frame.padding(rail_padding(insets))
+        } else if column && !insets.is_zero() {
+            // The system's band along the trailing edge is not padded: the column
+            // floats in it and the pages' content keeps clear of it inside their
+            // scrollables, so the scrollbars stand at the edge. A fold's own
+            // inset is kept.
+            let system = ctx.watch_safe_area_insets();
+            let right = if insets.right > system.right { insets.right } else { 0.0 };
+            frame.padding(padding_of(SafeAreaInsets::new(
+                insets.left,
+                insets.top,
+                right,
+                insets.bottom,
+            )))
+        } else if !insets.is_zero() {
+            frame.padding(padding_of(insets))
+        } else {
+            frame
+        };
+        frame.child(if rail {
+            // The rail floats over the page, whose content keeps clear of it.
+            Stack::new()
+                .children([
+                    SizedBox::new()
+                        .width(Percent(100.0))
+                        .height(Percent(100.0))
+                        .box_child(Stack::new().children(content)),
+                    // The bar's buttons stand on the trailing edge, above the tab
+                    // rail, on the line the status bar is on; it spans the window
+                    // so that its title and search keep to the page's side.
+                    Positioned::new()
+                        .layer(3)
+                        .box_child(ActionBarSlot::new(route.clone(), true))
+                        .boxed(),
+                    NavbarSlot::new(route, true).boxed(),
+                ])
+                .boxed()
+        } else if mobile {
+            content.push(NavbarSlot::new(route, false).boxed());
+            Stack::new().children(content).boxed()
+        } else {
+            let window = Row::new()
+                .justify_content(JustifyContent::SpaceBetween)
+                .children([
+                    AppSideBar::new().boxed(),
+                    Expanded::new()
+                        .flex(0.95)
+                        .box_child(Stack::new().children(content)),
+                ]);
+            // Settings, the sign-in and the profile open in windows of their own.
+            Stack::new()
+                .children([
+                    SizedBox::new()
+                        .width(Percent(100.0))
+                        .height(Percent(100.0))
+                        .box_child(window),
+                    // Takes no room: it declares those windows, which are open
+                    // while the store says so.
+                    WindowsLayer.boxed(),
+                ])
+                .boxed()
+        })
     }
 }
 
@@ -131,7 +198,13 @@ impl StatelessWidget for ShellFrame {
 /// It paints nothing. Its request key is the same on every rebuild of the shell,
 /// so the request is made the once and is kept; a member who signs in by hand
 /// before it is answered is not replaced by it.
+///
+/// The tests leave it out: the vault is the Keychain, which asks whoever runs them
+/// for their password, and holds their own sign-in.
 fn restore_session(store: ProviderHandle<AppStore>) -> AnyWidget {
+    if cfg!(test) {
+        return Widget::boxed(ZeroSizedBox);
+    }
     AsyncBuilder::new()
         .request_key("restore-session")
         .future(move || {
@@ -196,7 +269,7 @@ fn hides_navbar(route: &AppRouter) -> bool {
 }
 
 /// How long a button takes to come in or go out.
-const BUTTON_DURATION: Duration = Duration::from_millis(400);
+const BUTTON_DURATION: Duration = Duration::from_millis(300);
 
 /// The post a route shows, if it shows one.
 fn post_of(route: &AppRouter) -> Option<i64> {
@@ -229,11 +302,14 @@ fn is_account(route: &AppRouter) -> bool {
 fn has_back(route: &AppRouter) -> bool {
     post_of(route).is_some()
         || profile_of(route).is_some()
-        || matches!(route, AppRouter::Settings
+        || matches!(
+            route,
+            AppRouter::Settings
                 | AppRouter::SettingsAppearance
                 | AppRouter::Login
                 | AppRouter::LoginEmail
-                | AppRouter::LoginPassword)
+                | AppRouter::LoginPassword
+        )
 }
 
 /// Where the bar over a page is: its parts come in with the page and go with it.
@@ -244,11 +320,13 @@ fn has_back(route: &AppRouter) -> bool {
 #[derive(Clone, StatefulWidget)]
 struct ActionBarSlot {
     route: AppRouter,
+    /// Whether the bar's buttons stand in a column on the trailing edge.
+    vertical: bool,
 }
 
 impl ActionBarSlot {
-    fn new(route: AppRouter) -> Self {
-        Self { route }
+    fn new(route: AppRouter, vertical: bool) -> Self {
+        Self { route, vertical }
     }
 }
 
@@ -266,7 +344,7 @@ struct Part<T> {
 
 impl<T> Part<T> {
     fn new(shown: Option<T>) -> Self {
-        let controller = AnimationController::new(BUTTON_DURATION, curves::FAST_OUT_SLOW_IN);
+        let controller = AnimationController::new(BUTTON_DURATION, curves::EASE_IN_OUT);
         if shown.is_some() {
             controller.set_value(1.0);
         }
@@ -317,6 +395,7 @@ impl<T> Part<T> {
 
 struct ActionBarSlotState {
     route: AppRouter,
+    vertical: bool,
     /// Whether the page before this one was opened from another, so that this
     /// one is where the user came back to.
     came_back: bool,
@@ -348,9 +427,14 @@ impl ActionBarSlotState {
     /// two at once would put one over the other.
     fn follow_end(&mut self) {
         let free = |others: [&bool; 2]| !others.into_iter().any(|mounted| *mounted);
-        let counts = post_of(&self.route).filter(|_| free([&self.toggle.mounted, &self.settings.mounted]));
-        let toggle = is_search(&self.route).then_some(()).filter(|_| free([&self.counts.mounted, &self.settings.mounted]));
-        let settings = is_account(&self.route).then_some(()).filter(|_| free([&self.counts.mounted, &self.toggle.mounted]));
+        let counts =
+            post_of(&self.route).filter(|_| free([&self.toggle.mounted, &self.settings.mounted]));
+        let toggle = is_search(&self.route)
+            .then_some(())
+            .filter(|_| free([&self.counts.mounted, &self.settings.mounted]));
+        let settings = is_account(&self.route)
+            .then_some(())
+            .filter(|_| free([&self.counts.mounted, &self.toggle.mounted]));
         self.counts.follow(counts);
         // Sending one out may be what lets the next in, but it is still going out
         // until its motion ends, which is when this is asked again.
@@ -365,6 +449,7 @@ impl StatefulWidget for ActionBarSlot {
     fn create_state(self) -> Self::State {
         // A shell that starts on a page with a bar (a deep link) has it in place.
         ActionBarSlotState {
+            vertical: self.vertical,
             came_back: false,
             back: Part::new(has_back(&self.route).then_some(())),
             title: Part::new(profile_of(&self.route)),
@@ -442,11 +527,17 @@ impl State<ActionBarSlot> for ActionBarSlotState {
             self.came_back = has_back(&self.route);
             self.route = new.route;
         }
+        self.vertical = new.vertical;
         self.follow_route();
     }
 
     fn build(&self, _ctx: &BuildContext) -> impl Widget {
-        if !self.back.mounted && !self.title.mounted && !self.counts.mounted && !self.search.mounted && !self.settings.mounted {
+        if !self.back.mounted
+            && !self.title.mounted
+            && !self.counts.mounted
+            && !self.search.mounted
+            && !self.settings.mounted
+        {
             return Widget::boxed(ZeroSizedBox);
         }
         #[cfg(test)]
@@ -470,6 +561,8 @@ impl State<ActionBarSlot> for ActionBarSlotState {
             }),
             self.settings.visible().map(|(controller, _)| controller),
         )
+        .vertical(self.vertical)
+        .beside_rail(!hides_navbar(&self.route))
         .boxed()
     }
 }
@@ -480,16 +573,20 @@ impl State<ActionBarSlot> for ActionBarSlotState {
 #[derive(Clone, StatefulWidget)]
 struct NavbarSlot {
     route: AppRouter,
+    /// Whether the bar stands along the trailing edge, in a window that is wide
+    /// but short, rather than floating along the bottom.
+    rail: bool,
 }
 
 impl NavbarSlot {
-    fn new(route: AppRouter) -> Self {
-        Self { route }
+    fn new(route: AppRouter, rail: bool) -> Self {
+        Self { route, rail }
     }
 }
 
 struct NavbarSlotState {
     route: AppRouter,
+    rail: bool,
     bar: Part<()>,
 }
 
@@ -507,6 +604,7 @@ impl StatefulWidget for NavbarSlot {
         // A shell that starts on a page with the bar has it in place.
         NavbarSlotState {
             bar: Part::new((!hides_navbar(&self.route)).then_some(())),
+            rail: self.rail,
             route: self.route,
         }
     }
@@ -536,24 +634,33 @@ impl StatusListener for NavbarListener {
 
 impl State<NavbarSlot> for NavbarSlotState {
     fn init_state(&mut self, updater: StateUpdater<Self>) {
-        self.bar.controller.add_status_listener(Rc::new(NavbarListener { updater }));
+        self.bar
+            .controller
+            .add_status_listener(Rc::new(NavbarListener { updater }));
     }
 
     fn adopt_config_from(&mut self, new: Self) {
         self.route = new.route;
+        self.rail = new.rail;
         self.follow_route();
     }
 
     fn build(&self, _ctx: &BuildContext) -> impl Widget {
         match self.bar.visible() {
-            Some((controller, _)) => MobileNavbar::new(controller).boxed(),
+            // The pages with a button in the column on the edge, and the rail, push
+            // the rail down clear of it.
+            Some((controller, _)) => MobileNavbar::new(controller)
+                .vertical(self.rail)
+                .beside_column(has_back(&self.route) || is_account(&self.route))
+                .boxed(),
             None => Widget::boxed(ZeroSizedBox),
         }
     }
 }
 
 #[cfg(test)]
-pub(crate) static BAR_BUILDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+pub(crate) static BAR_BUILDS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
 /// How far the bar over a page, and the page's own top spacing, sit below the top
 /// of a narrow window: what the status bar takes, and a little room under it, as
@@ -561,8 +668,54 @@ pub(crate) static BAR_BUILDS: std::sync::atomic::AtomicUsize = std::sync::atomic
 /// bar is spaced from this.
 pub const MOBILE_TOP: u32 = 52;
 
+/// How far down the pages start their content: below the bar over a phone's page.
+/// In the layout with the buttons in a column on the trailing edge, as on the outer
+/// display of an iPhone Duo, no bar lies along the top, so the pages start at the
+/// top of the window.
+pub fn content_top(ctx: &BuildContext) -> u32 {
+    match shell_layout(ctx) {
+        ShellLayout::Phone if !buttons_in_column(ctx) => MOBILE_TOP,
+        _ => 0,
+    }
+}
+
+/// Whether the bar's buttons stand in a column on the trailing edge, below the
+/// system's status area, instead of along the top: in the rail layout, and in the
+/// full fold of an iPhone Duo, held upright or on its side.
+pub fn buttons_in_column(ctx: &BuildContext) -> bool {
+    shell_layout(ctx) == ShellLayout::Rail || current_fold_posture(ctx).is_some()
+}
+
+/// How much of the trailing edge, from the window's side, the column of buttons
+/// and the tab rail take: what the content of a page keeps clear of. `0` where the
+/// buttons lie along the top.
+pub fn trailing_band(ctx: &BuildContext) -> f32 {
+    match shell_layout(ctx) {
+        ShellLayout::Rail => rail_band(&content_insets(ctx)),
+        _ if buttons_in_column(ctx) => rail_band(&ctx.watch_safe_area_insets()),
+        _ => 0.0,
+    }
+}
+
+/// `child`, padded on the trailing side to keep clear of the column of buttons. It
+/// goes inside a page's scrollable, so the scrollbar stays at the edge of the
+/// window and only the content makes way.
+pub fn beside_buttons(ctx: &BuildContext, child: impl Widget + 'static) -> AnyWidget {
+    let band = trailing_band(ctx);
+    if band <= 0.0 {
+        return child.boxed();
+    }
+    Container::new()
+        .padding(LayoutSpacing::new().right(band.round() as u32))
+        .child(child)
+        .boxed()
+}
+
+/// Whether the pages are laid out as a phone's, with the whole window and no
+/// sidebar: a narrow window, or a wide one that is too short for the sidebar's
+/// column, as the outer display of an iPhone Duo.
 pub fn is_mobile(ctx: &BuildContext) -> bool {
-    MediaQuery::select(ctx, |media| media.size.width < MOBILE_BREAKPOINT)
+    shell_layout(ctx).is_compact()
 }
 
 /// Whether signing in and the member's profile open in windows of their own: on a
@@ -590,7 +743,7 @@ mod tests {
     }
 
     fn state(route: AppRouter) -> ActionBarSlotState {
-        ActionBarSlot::new(route).create_state()
+        ActionBarSlot::new(route, false).create_state()
     }
 
     fn go(shell: &mut ActionBarSlotState, route: AppRouter) {
@@ -610,7 +763,10 @@ mod tests {
         assert!(shell.back.mounted && shell.counts.mounted && !shell.title.mounted);
         assert_eq!(shell.counts.shown, Some(7));
         assert_eq!(
-            (shell.back.controller.value(), shell.counts.controller.value()),
+            (
+                shell.back.controller.value(),
+                shell.counts.controller.value()
+            ),
             (1.0, 1.0)
         );
     }
@@ -796,10 +952,16 @@ mod tests {
     }
 
     #[test]
-    fn the_tab_bar_gives_way_to_posts_other_profiles_the_sign_in_pages_and_the_appearance_page_only() {
+    fn the_tab_bar_gives_way_to_posts_other_profiles_the_sign_in_pages_and_the_appearance_page_only()
+     {
         for route in [
-            AppRouter::PostDetail { slug: ShareRef::from_static("a"), id: 1 },
-            AppRouter::UserProfile { username: ShareRef::from_static("domma") },
+            AppRouter::PostDetail {
+                slug: ShareRef::from_static("a"),
+                id: 1,
+            },
+            AppRouter::UserProfile {
+                username: ShareRef::from_static("domma"),
+            },
             AppRouter::Login,
             AppRouter::LoginEmail,
             AppRouter::LoginPassword,
@@ -814,14 +976,17 @@ mod tests {
             AppRouter::Search,
             AppRouter::Account,
             AppRouter::Settings,
-            AppRouter::CategoryTopics { slug: ShareRef::from_static("rust"), id: 12 },
+            AppRouter::CategoryTopics {
+                slug: ShareRef::from_static("rust"),
+                id: 12,
+            },
         ] {
             assert!(!hides_navbar(&route));
         }
     }
 
     fn navbar(route: AppRouter) -> NavbarSlotState {
-        NavbarSlot::new(route).create_state()
+        NavbarSlot::new(route, false).create_state()
     }
 
     fn navbar_go(shell: &mut NavbarSlotState, route: AppRouter) {

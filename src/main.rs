@@ -2,6 +2,7 @@ mod api;
 mod app_shell;
 mod components;
 mod html_markdown;
+mod layout;
 mod models;
 mod preferences;
 mod router;

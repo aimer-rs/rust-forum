@@ -14,6 +14,9 @@ pub struct TopicStreamParser {
     found_array: bool,
     /// The response's `users`, which Discourse sends ahead of the topics.
     users: Vec<User>,
+    /// Whether the response named a page after this one (`more_topics_url`, which
+    /// Discourse also sends ahead of the topics). Known once the topics begin.
+    has_more: bool,
 }
 
 impl TopicStreamParser {
@@ -21,7 +24,13 @@ impl TopicStreamParser {
         Self {
             found_array: false,
             users: Vec::new(),
+            has_more: false,
         }
+    }
+
+    /// Whether the forum has a page of topics after this one.
+    pub fn has_more(&self) -> bool {
+        self.has_more
     }
 
     /// The user who started `topic`: its original poster, else its first one.
@@ -55,6 +64,8 @@ impl TopicStreamParser {
                     break;
                 };
                 self.users = parse_users(&buffer[..key]);
+                // A last page has no `more_topics_url`, or a null one.
+                self.has_more = find_subslice(&buffer[..key], b"\"more_topics_url\":\"").is_some();
                 buffer.drain(..=key + rel);
                 self.found_array = true;
                 continue;
@@ -77,8 +88,9 @@ impl TopicStreamParser {
 
 /// Streams the topics of a Discourse path such as `latest.json` or
 /// `c/{slug}/{id}.json`, invoking `on_topic` for each topic as soon as its
-/// object is fully received.
-pub async fn stream_topics(path: &str, on_topic: impl FnMut(Topic)) -> Result<(), String> {
+/// object is fully received. Resolves to whether the forum has more topics after
+/// these, to be asked for with the path's next `?page=`.
+pub async fn stream_topics(path: &str, on_topic: impl FnMut(Topic)) -> Result<bool, String> {
     stream_topics_from(BASE_URL, path, on_topic).await
 }
 
@@ -87,7 +99,7 @@ async fn stream_topics_from(
     base_url: &str,
     path: &str,
     mut on_topic: impl FnMut(Topic),
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let url = format!("{base_url}/{path}");
     let mut response = session::client()
         .get(url)
@@ -119,7 +131,7 @@ async fn stream_topics_from(
         }
     }
 
-    Ok(())
+    Ok(parser.has_more())
 }
 
 /// Reads the `users` array out of the text that precedes `topic_list`.
@@ -267,6 +279,24 @@ mod tests {
     }
 
     #[test]
+    fn knows_whether_a_page_is_followed_by_another() {
+        let mut parser = TopicStreamParser::new();
+        let mut buffer = br#"{"users":[],"topic_list":{"more_topics_url":"/latest?page=1","topics":[{"id":1}]}}"#.to_vec();
+        parser.poll(&mut buffer);
+        assert!(parser.has_more());
+
+        let mut parser = TopicStreamParser::new();
+        let mut buffer = br#"{"users":[],"topic_list":{"more_topics_url":null,"topics":[{"id":1}]}}"#.to_vec();
+        parser.poll(&mut buffer);
+        assert!(!parser.has_more());
+
+        let mut parser = TopicStreamParser::new();
+        let mut buffer = br#"{"users":[],"topic_list":{"topics":[{"id":1}]}}"#.to_vec();
+        parser.poll(&mut buffer);
+        assert!(!parser.has_more());
+    }
+
+    #[test]
     fn ignores_braces_inside_strings() {
         let mut parser = TopicStreamParser::new();
         let mut buffer =
@@ -334,7 +364,7 @@ mod tests {
         let mut topics = Vec::new();
         let result = stream_topics_from(&forum, "new.json", |topic| topics.push(topic)).await;
 
-        assert_eq!(result, Ok(()));
+        assert_eq!(result, Ok(false));
         assert_eq!(topics.len(), 1);
         assert_eq!(topics[0].title, "Members only");
     }
